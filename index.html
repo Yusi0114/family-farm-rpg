@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>家族同樂合作農場 TRPG</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body class="bg-stone-200 text-stone-800 select-none">
+
+  <!-- 手機版型置中容器 -->
+  <div id="app-shell" class="mx-auto max-w-md min-h-[100dvh] h-[100dvh] bg-amber-50/40 shadow-2xl flex flex-col relative overflow-hidden">
+
+    <!-- ==================== 畫面一：登入與角色選擇 ==================== -->
+    <div id="login-view" class="flex-1 flex flex-col justify-between p-5 overflow-y-auto bg-gradient-to-b from-amber-100 via-orange-50 to-emerald-50">
+      <div class="pt-4 text-center">
+        <div class="inline-block px-3 py-1 rounded-full bg-red-600 text-white text-xs font-bold tracking-wider shadow-sm mb-2">
+          🧧 過年家族多人合作 TRPG
+        </div>
+        <h1 class="text-2xl font-black text-stone-800 tracking-tight">山海小鎮合作農場</h1>
+        <p class="text-xs text-stone-600 mt-1">星露谷經營 × D&D 擲骰冒險 × 台灣在地家常味</p>
+      </div>
+
+      <!-- 房間代碼輸入卡片 -->
+      <div class="bg-white/95 rounded-2xl p-4 shadow-md border border-amber-200 my-4">
+        <label class="block text-xs font-bold text-stone-600 mb-1.5">🏠 家庭專屬房間代碼</label>
+        <div class="flex gap-2">
+          <input
+            id="room-code-input"
+            type="text"
+            placeholder="例如：2027HAPPY"
+            value="2027HAPPY"
+            class="flex-1 px-3 py-2.5 rounded-xl border border-stone-300 bg-stone-50 font-bold text-stone-800 uppercase focus:outline-none focus:border-emerald-500"
+          />
+          <button
+            id="btn-load-room"
+            class="px-4 py-2.5 rounded-xl bg-emerald-600 active:bg-emerald-700 text-white font-bold text-sm shadow-sm transition"
+          >
+            進入村莊
+          </button>
+        </div>
+        <p class="text-[11px] text-stone-400 mt-1.5">全家人輸入相同的房間代碼，就能進入同一個村莊一起經營！</p>
+      </div>
+
+      <!-- 已有角色認領列表 -->
+      <div id="player-select-section" class="flex-1 flex flex-col min-h-0">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-sm font-bold text-stone-700">👨‍👩‍👧‍👦 選擇你的村民角色</h2>
+          <span id="room-status-badge" class="text-[11px] text-emerald-700 font-medium">請先點擊進入村莊</span>
+        </div>
+
+        <div id="existing-players-list" class="grid grid-cols-2 gap-2.5 overflow-y-auto pb-2">
+          <!-- 動態渲染已有角色卡片 -->
+        </div>
+
+        <button
+          id="btn-open-create-char"
+          class="mt-3 w-full py-3 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-100/70 active:bg-amber-200 text-amber-900 font-bold text-sm flex items-center justify-center gap-1.5 transition"
+        >
+          <span>➕ 建立新村民角色（自訂紙娃娃）</span>
+        </button>
+      </div>
+
+      <div class="text-center text-[11px] text-stone-400 pt-3">
+        免安裝・自動存檔・支援多人即時同步與單人遊玩
+      </div>
+    </div>
+
+    <!-- ==================== 畫面二：主遊戲四區塊介面 ==================== -->
+    <div id="game-view" class="hidden flex-1 flex flex-col h-full overflow-hidden">
+
+      <!-- 【區塊 1】頂部狀態列 -->
+      <header id="top-hud" class="bg-white border-b border-stone-200 px-3 py-2 shadow-xs shrink-0 z-10">
+        <!-- 由 ui.js 動態渲染 -->
+      </header>
+
+      <!-- 【方案 A】地點快速切換列（顯示家人頭像駐點） -->
+      <nav id="location-bar" class="bg-stone-100/90 border-b border-stone-200 px-2 py-1.5 flex gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+        <!-- 由 ui.js 動態渲染 -->
+      </nav>
+
+      <!-- 【區塊 2 & 3】中段主互動與行動區（隨底部導航分頁切換） -->
+      <main id="main-content" class="flex-1 overflow-y-auto p-3 space-y-3">
+        <!-- 由 ui.js 動態渲染 -->
+      </main>
+
+      <!-- 【區塊 4】底部即時動態框 ＋ 5 顆固定導航列 -->
+      <footer class="bg-white border-t border-stone-200 shrink-0 z-10 pb-safe">
+        <!-- 即時動態跑馬燈（點擊可展開歷史） -->
+        <div id="activity-ticker" class="bg-stone-800 text-stone-100 px-3 py-1.5 text-xs cursor-pointer active:bg-stone-700 transition">
+          <div class="flex items-center justify-between gap-2">
+            <div id="ticker-latest" class="truncate flex-1 font-medium">📢 載入全村動態中...</div>
+            <span class="text-[10px] text-amber-300 shrink-0">▲ 紀錄</span>
+          </div>
+        </div>
+
+        <!-- 5 顆固定導航按鈕 -->
+        <div id="bottom-nav" class="grid grid-cols-5 gap-1 px-1.5 py-1.5 bg-white">
+          <button data-tab="action" class="nav-btn flex flex-col items-center justify-center py-1 rounded-xl text-emerald-700 bg-emerald-50 font-bold">
+            <span class="text-lg leading-none">🌾</span>
+            <span class="text-[11px] mt-1">行動</span>
+          </button>
+          <button data-tab="bag" class="nav-btn flex flex-col items-center justify-center py-1 rounded-xl text-stone-500">
+            <span class="text-lg leading-none">🎒</span>
+            <span class="text-[11px] mt-1">背包倉庫</span>
+          </button>
+          <button data-tab="quests" class="nav-btn flex flex-col items-center justify-center py-1 rounded-xl text-stone-500 relative">
+            <span class="text-lg leading-none">📜</span>
+            <span class="text-[11px] mt-1">委託</span>
+            <span id="quest-badge-dot" class="hidden absolute top-1 right-4 w-2 h-2 rounded-full bg-red-500"></span>
+          </button>
+          <button data-tab="character" class="nav-btn flex flex-col items-center justify-center py-1 rounded-xl text-stone-500 relative">
+            <span class="text-lg leading-none">🧙</span>
+            <span class="text-[11px] mt-1">角色</span>
+            <span id="stat-badge-dot" class="hidden absolute top-1 right-4 w-2 h-2 rounded-full bg-amber-500"></span>
+          </button>
+          <button id="btn-nav-sleep" class="flex flex-col items-center justify-center py-1 rounded-xl text-indigo-600 active:bg-indigo-50">
+            <span class="text-lg leading-none">🛏️</span>
+            <span id="sleep-nav-label" class="text-[11px] mt-1 font-bold">睡覺</span>
+          </button>
+        </div>
+      </footer>
+    </div>
+
+    <!-- ==================== 彈窗 1：創角與紙娃娃組合器 ==================== -->
+    <div id="create-char-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-3">
+      <div class="bg-white w-full max-w-md max-h-[92dvh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-modal-pop">
+        <div class="px-4 py-3 bg-amber-100 border-b border-amber-200 flex items-center justify-between">
+          <h3 class="font-black text-stone-800 text-base">✨ 建立新村民角色</h3>
+          <button id="btn-close-create-char" class="w-8 h-8 rounded-full bg-white/80 text-stone-600 font-bold">✕</button>
+        </div>
+
+        <div id="create-char-body" class="flex-1 overflow-y-auto p-4 space-y-4">
+          <!-- 由 ui.js 動態渲染紙娃娃與配點介面 -->
+        </div>
+
+        <div class="p-3 border-t border-stone-200 bg-stone-50">
+          <button id="btn-submit-create-char" class="w-full py-3 rounded-2xl bg-emerald-600 active:bg-emerald-700 text-white font-black text-base shadow-md">
+            完成創角並入住村莊！
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 彈窗 2：通用互動視窗（商店/廚房/鐵匠/刮刮樂/播種） ==================== -->
+    <div id="generic-modal" class="hidden fixed inset-0 z-40 bg-black/55 flex items-end sm:items-center justify-center">
+      <div class="bg-white w-full max-w-md max-h-[85dvh] rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-modal-pop">
+        <div class="px-4 py-3 bg-stone-100 border-b border-stone-200 flex items-center justify-between shrink-0">
+          <h3 id="generic-modal-title" class="font-black text-stone-800 text-base">標題</h3>
+          <button id="btn-close-generic-modal" class="w-8 h-8 rounded-full bg-white text-stone-600 font-bold shadow-xs">✕</button>
+        </div>
+        <div id="generic-modal-body" class="flex-1 overflow-y-auto p-4 space-y-3">
+          <!-- 動態內容 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 彈窗 3：D&D d20 擲骰檢定動畫遮罩 ==================== -->
+    <div id="dice-overlay" class="hidden fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+      <div class="bg-white w-full max-w-sm rounded-3xl p-5 text-center shadow-2xl border-4 border-amber-300 animate-modal-pop">
+        <div id="dice-title" class="text-xs font-bold text-stone-500 uppercase tracking-wider mb-2">技能檢定</div>
+
+        <!-- 20面骰視覺 -->
+        <div id="dice-box" class="mx-auto w-24 h-24 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-lg my-3 border-2 border-amber-200">
+          <span id="dice-number" class="text-4xl font-black">20</span>
+        </div>
+
+        <div id="dice-formula" class="text-sm font-bold text-stone-700 mt-2">
+          1d20 (--) + 加值 (--) vs DC --
+        </div>
+
+        <div id="dice-badge" class="inline-block px-3 py-1 rounded-full text-xs font-black mt-2 bg-stone-100 text-stone-600">
+          擲骰中...
+        </div>
+
+        <p id="dice-result-text" class="text-sm text-stone-700 bg-amber-50 rounded-xl p-3 mt-3 font-medium leading-relaxed">
+          正在判定行動結果...
+        </p>
+
+        <div id="dice-levelup-box" class="hidden mt-2 text-xs font-bold text-emerald-700 bg-emerald-50 rounded-xl p-2"></div>
+
+        <button id="btn-close-dice" class="mt-4 w-full py-2.5 rounded-xl bg-stone-800 text-white font-bold text-sm">
+          太好了（點擊繼續）
+        </button>
+      </div>
+    </div>
+
+    <!-- Toast 提示訊息容器 -->
+    <div id="toast-container" class="fixed top-14 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[90%] max-w-sm pointer-events-none"></div>
+  </div>
+
+  <script type="module" src="./js/ui.js"></script>
+</body>
+</html>
