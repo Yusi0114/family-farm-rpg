@@ -349,6 +349,7 @@ class WorldMapController {
     this.currentMapId = 'town';
     this.localPos = { x: 480, y: 365, initialized: false };
     this.remotePositions = new Map();
+    this.remoteLocations = new Map();
     this.walkTarget = null;
     this.walkPhase = 0;
 
@@ -380,6 +381,7 @@ class WorldMapController {
     this.lastSyncTime = 0;
     this.dirtySync = false;
     this.positionSyncErrorShown = false;
+    this.actionSyncErrorShown = false;
     this.lastSyncedPos = { x: 0, y: 0 };
     this.pendingSyncTimer = null;
 
@@ -416,6 +418,13 @@ class WorldMapController {
       const tierInfo = TOOL_TIER_STYLES[tier] || TOOL_TIER_STYLES.wood;
       const toolTitle = `${tierInfo.name}${TOOL_CATEGORY_NAMES[category] || '工具'}`;
       const durationMs = Number.isFinite(opts.duration) && opts.duration > 0 ? opts.duration : 1150;
+      const startedAt = Date.now();
+      const actionAnimation = {
+        category,
+        location: this.currentMapId,
+        startedAt,
+        expiresAt: startedAt + durationMs
+      };
 
       this.walkTarget = null;
       this.joyActive = false;
@@ -438,6 +447,20 @@ class WorldMapController {
         lastSoundTick: -1,
         resolve
       };
+      this.syncActionPresence(actionAnimation);
+    });
+  }
+
+  syncActionPresence(actionAnimation) {
+    if (!this.roomId || !this.meId) return;
+    updatePlayerPresence(this.roomId, this.meId, { actionAnimation }).then(() => {
+      this.actionSyncErrorShown = false;
+    }).catch(err => {
+      console.error(err);
+      if (!this.actionSyncErrorShown) {
+        this.actionSyncErrorShown = true;
+        this.callbacks.onActionSyncError?.();
+      }
     });
   }
 
@@ -579,6 +602,7 @@ class WorldMapController {
     if (this.activeActionAnim) {
       const activeAction = this.activeActionAnim;
       this.activeActionAnim = null;
+      this.syncActionPresence(null);
       activeAction.resolve?.();
     }
     if (this.rafId) {
@@ -1045,6 +1069,7 @@ class WorldMapController {
 
       if (progress >= 1) {
         this.activeActionAnim = null;
+        this.syncActionPresence(null);
         action.resolve?.();
       }
     }
@@ -1230,8 +1255,14 @@ class WorldMapController {
 
     for (const p of this.players) {
       if (p.id === this.meId) continue;
+      const location = p.location || 'town';
       const targetX = typeof p.posX === 'number' ? p.posX : 480;
       const targetY = typeof p.posY === 'number' ? p.posY : 365;
+      if (this.remoteLocations.get(p.id) !== location) {
+        this.remoteLocations.set(p.id, location);
+        this.remotePositions.set(p.id, { x: targetX, y: targetY });
+        continue;
+      }
       const cur = this.remotePositions.get(p.id) || { x: targetX, y: targetY };
       cur.x += (targetX - cur.x) * Math.min(1, dt * 6);
       cur.y += (targetY - cur.y) * Math.min(1, dt * 6);
@@ -1344,12 +1375,18 @@ class WorldMapController {
       if (!isOnline || pLoc !== this.currentMapId) continue;
 
       const pos = isMe ? this.localPos : (this.remotePositions.get(p.id) || { x: mapDef.spawnX, y: mapDef.spawnY });
-      renderChars.push({ player: p, x: pos.x, y: pos.y, isMe });
+      const targetX = typeof p.posX === 'number' ? p.posX : 480;
+      const targetY = typeof p.posY === 'number' ? p.posY : 365;
+      const isMoving = !isMe && Math.hypot(targetX - pos.x, targetY - pos.y) > 4;
+      renderChars.push({ player: p, x: pos.x, y: pos.y, isMe, isMoving });
     }
     renderChars.sort((a, b) => a.y - b.y);
 
     for (const item of renderChars) {
-      this.drawPlayerCharacter(ctx, item.player, item.x, item.y, item.isMe);
+      this.drawPlayerCharacter(ctx, item.player, item.x, item.y, item.isMe, item.isMoving);
+      if (!item.isMe) {
+        this.drawRemoteActionIndicator(ctx, item.player, item.x, item.y, now);
+      }
     }
 
     // 10. 海邊盤旋海鷗
@@ -1562,6 +1599,40 @@ class WorldMapController {
     roundRectPath(ctx, barX + 2, barY + 2, fillW, barH - 4, 3.5);
     ctx.fillStyle = category === 'watering_can' ? '#38bdf8' : '#22c55e';
     ctx.fill();
+    ctx.restore();
+  }
+
+  drawRemoteActionIndicator(ctx, player, x, y, now) {
+    const action = player.actionAnimation;
+    if (!action || action.location !== this.currentMapId || action.expiresAt <= Date.now()) return;
+
+    const icons = {
+      watering_can: '🪣',
+      pickaxe: '⛏️',
+      axe: '🪓',
+      hoe: '🪏',
+      trowel: '🪏',
+      brush: '🧹',
+      fishing_rod: '🎣',
+      harvest: '🌾'
+    };
+    const icon = icons[action.category] || '✨';
+    const remaining = action.expiresAt - Date.now();
+
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, remaining / 180);
+    ctx.translate(x + 24, y - 78 + Math.sin(now * 0.012) * 2);
+    ctx.rotate(Math.sin(now * 0.018) * 0.28);
+    ctx.fillStyle = 'rgba(28, 25, 23, 0.82)';
+    ctx.strokeStyle = action.category === 'watering_can' ? '#38bdf8' : '#facc15';
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, -13, -13, 26, 26, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = '17px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon, 0, 0);
     ctx.restore();
   }
 
@@ -2068,10 +2139,13 @@ class WorldMapController {
     }
   }
 
-  drawPlayerCharacter(ctx, player, x, y, isMe) {
-    const isMoving = isMe && this.walkPhase > 0;
-    const bobOffset = isMoving ? Math.abs(Math.sin(this.walkPhase)) * 4 : Math.sin(performance.now() * 0.004) * 1.2;
-    const walkFrame = !isMoving ? 0 : (Math.sin(this.walkPhase) >= 0 ? 1 : 2);
+  drawPlayerCharacter(ctx, player, x, y, isMe, isMovingOverride = false) {
+    const isMoving = isMe ? this.walkPhase > 0 : isMovingOverride;
+    const walkPhase = isMe
+      ? this.walkPhase
+      : performance.now() * 0.012 + player.id.length;
+    const bobOffset = isMoving ? Math.abs(Math.sin(walkPhase)) * 4 : Math.sin(performance.now() * 0.004) * 1.2;
+    const walkFrame = !isMoving ? 0 : (Math.sin(walkPhase) >= 0 ? 1 : 2);
 
     ctx.fillStyle = 'rgba(42, 24, 12, 0.3)';
     ctx.beginPath();

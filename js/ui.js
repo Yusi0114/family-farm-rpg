@@ -958,6 +958,7 @@ function renderActionTab(village, me) {
         getSelectedBait: () => state.selectedBait,
         onBaitChange: (val) => { state.selectedBait = val; },
         onMovementSyncError: () => showToast('角色位置同步遭拒；請確認 Firebase 已部署角色所有權規則。', 'error'),
+        onActionSyncError: () => showToast('角色動作同步失敗，請檢查網路連線。', 'error'),
         onInteract: (obj) => {
           const curVillage = state.village;
           const curMe = getMe();
