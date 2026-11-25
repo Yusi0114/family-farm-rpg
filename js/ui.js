@@ -32,7 +32,9 @@ import {
   initOrGetRoom,
   createPlayer,
   updatePlayerPresence,
-  goToSleepAndMaybeAdvanceDay
+  goToSleepAndMaybeAdvanceDay,
+  cancelSleepWaiting,
+  actionPassOut
 } from './db.js';
 import {
   getBackpackCapacity,
@@ -67,6 +69,7 @@ import {
 // 一、 全域狀態與工具函式
 // ============================================================================
 
+const savedSettings = JSON.parse(localStorage.getItem('farm_user_settings') || 'null') || {};
 const state = {
   roomId: localStorage.getItem('farm_room_id') || '2027HAPPY',
   playerId: localStorage.getItem('farm_player_id') || null,
@@ -76,10 +79,13 @@ const state = {
   activeTab: 'action',
   warehouseCategory: 'all',
   selectedBait: '',
-  settings: JSON.parse(localStorage.getItem('farm_user_settings') || 'null') || {
-    controlMode: 'dual',
-    joystickSide: 'left',
-    moveSpeed: 'normal'
+  settings: {
+    ...savedSettings,
+    controlMode: ['dual', 'joystick', 'tap'].includes(savedSettings.controlMode)
+      ? savedSettings.controlMode
+      : 'dual',
+    joystickSide: savedSettings.joystickSide === 'right' ? 'right' : 'left',
+    moveSpeed: savedSettings.moveSpeed === 'fast' ? 'fast' : 'normal'
   },
   isConnecting: false,
   isActionBusy: false,
@@ -87,7 +93,9 @@ const state = {
   lastSyncedPersonalTime: null,
   passiveClockTimer: null,
   unsubRoom: null,
-  heartbeatTimer: null
+  heartbeatTimer: null,
+  isPassOutInProgress: false,
+  passOutRetryAt: 0
 };
 
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -118,6 +126,7 @@ function getMe() {
 function resetLocalPersonalClock() {
   state.passiveMinutesElapsed = 0;
   state.lastSyncedPersonalTime = 360;
+  state.passOutRetryAt = 0;
   const me = getMe();
   if (me) {
     me.personalTime = 360;
@@ -155,7 +164,7 @@ function startPassiveClockTimer() {
     const me = getMe();
     if (!me) return;
 
-    if (me.isSleeping) return;
+    if (me.isSleeping || me.readyToSleep || state.isPassOutInProgress) return;
 
     const base = toDayTimelineMinutes(me.personalTime ?? 360);
     const maxPassive = Math.max(0, 1560 - base);
@@ -165,6 +174,10 @@ function startPassiveClockTimer() {
 
     const clockEl = document.getElementById('hud-clock-text');
     if (clockEl) clockEl.textContent = formatGameTime(effMins);
+
+    if (effMins >= 1560 && Date.now() >= state.passOutRetryAt) {
+      passOutAtTwoAm(me, effMins);
+    }
   }, 10 * 1000);
 }
 
@@ -226,7 +239,7 @@ async function signOutGoogleAccount() {
  * 統一包裝所有遊戲動作：處理錯誤提示、觸發 d20 擲骰動畫、顯示升級提示
  */
 async function runAction(actionFn, options = {}) {
-  if (state.isActionBusy) return;
+  if (state.isActionBusy || state.isPassOutInProgress) return;
   state.isActionBusy = true;
 
   try {
@@ -352,6 +365,7 @@ async function connectToRoom(roomIdInput, autoLoginPlayerId = null) {
         if (prevDay !== undefined && (villageData.day !== prevDay || villageData.season !== prevSeason)) {
           resetLocalPersonalClock();
           if (typeof soundFX !== 'undefined') soundFX.playRooster();
+          worldMap.teleportLocalPlayer('farm', 265, 225);
         }
         if (getMe()) renderGameScreen();
       },
@@ -927,7 +941,29 @@ function updateNavBadges(village, me) {
   else questDot.classList.add('hidden');
 
   const sleepLabel = document.getElementById('sleep-nav-label');
-  sleepLabel.textContent = me.isSleeping ? '已睡覺' : '睡覺';
+  const isPassingOut = state.isPassOutInProgress;
+  const isWaiting = !isPassingOut && (me.readyToSleep || me.isSleeping);
+  const canSleepHere = worldMap.isAtSleepSpot();
+  sleepLabel.textContent = isPassingOut
+    ? '昏倒中'
+    : isWaiting
+    ? '暫時起床'
+    : canSleepHere
+      ? '上床睡覺'
+      : '回家睡覺';
+  const sleepButton = document.getElementById('btn-nav-sleep');
+  sleepButton.classList.toggle('bg-indigo-50', canSleepHere && !isWaiting && !isPassingOut);
+  sleepButton.classList.toggle('bg-amber-50', isWaiting);
+  sleepButton.querySelector('span')?.replaceChildren(
+    document.createTextNode(isPassingOut ? '💫' : isWaiting ? '☀️' : canSleepHere ? '😴' : '🏡')
+  );
+  sleepButton.title = isPassingOut
+    ? '體力耗盡，家人正將你扛回農舍'
+    : isWaiting
+    ? '在農舍床鋪取消等待'
+    : canSleepHere
+      ? '在家族農舍上床睡覺'
+      : '回到農場家族農舍才能睡覺';
 }
 
 // ============================================================================
@@ -938,33 +974,36 @@ function renderActionTab(village, me) {
   const container = document.getElementById('main-content');
   const locBar = document.getElementById('location-bar');
 
-  // 經典模式保留地點按鈕，其餘模式改用 2D 搖桿小鎮
-  if (state.settings.controlMode !== 'classic') {
-    if (locBar) locBar.classList.add('hidden');
+  // 三種移動模式共用 2D 地圖
+  if (locBar) locBar.classList.add('hidden');
 
-    // 保留已掛載的 Canvas，避免資料更新時中斷角色移動
-    if (document.getElementById('village-canvas')) {
-      worldMap.updateData(village, state.players, state.settings, me);
-      return;
-    }
+  // 保留已掛載的 Canvas，避免資料更新時中斷角色移動
+  if (document.getElementById('village-canvas')) {
+    worldMap.updateData(village, state.players, state.settings, me);
+    return;
+  }
 
-    worldMap.mount(container, {
-      roomId: state.roomId,
-      village,
-      players: state.players,
-      me,
-      settings: state.settings,
-      callbacks: {
+  worldMap.mount(container, {
+    roomId: state.roomId,
+    village,
+    players: state.players,
+    me,
+    settings: state.settings,
+    callbacks: {
         getSelectedBait: () => state.selectedBait,
         onBaitChange: (val) => { state.selectedBait = val; },
         onMovementSyncError: () => showToast('角色位置同步遭拒；請確認 Firebase 已部署角色所有權規則。', 'error'),
         onActionSyncError: () => showToast('角色動作同步失敗，請檢查網路連線。', 'error'),
+        onCancelSleep: () => cancelSleepWait(getMe()),
         onInteract: (obj) => {
           const curVillage = state.village;
           const curMe = getMe();
           if (!curVillage || !curMe) return;
 
-          if (obj.type === 'farm_plot') {
+          if (obj.type === 'sleep') {
+            if (curMe.readyToSleep || curMe.isSleeping) cancelSleepWait(curMe);
+            else openSleepModal(curVillage, curMe);
+          } else if (obj.type === 'farm_plot') {
             const plot = curVillage.farmPlots[obj.plotIndex];
             if (plot.cleared && !plot.cropId) openSeedPickerModal(curVillage, curMe, obj.plotIndex, obj);
             else {
@@ -1020,32 +1059,9 @@ function renderActionTab(village, me) {
               }
             });
           }
-        }
       }
-    });
-    return;
-  }
-
-  // 經典快速按鈕模式（長輩友善免走動）
-  worldMap.unmount();
-  if (locBar) locBar.classList.remove('hidden');
-
-  const loc = LOCATIONS[me.location] || LOCATIONS.farm;
-  let sceneBodyHtml = '';
-  if (loc.id === 'farm') sceneBodyHtml = renderFarmScene(village, me);
-  else if (loc.id === 'ranch') sceneBodyHtml = renderRanchScene(village, me);
-  else if (loc.id === 'town') sceneBodyHtml = renderTownScene(village, me);
-  else if (loc.id === 'beach') sceneBodyHtml = renderBeachScene(village, me);
-  else if (loc.id === 'mountain') sceneBodyHtml = renderMountainScene(village, me);
-
-  container.innerHTML = `
-    <div class="rounded-3xl p-4 bg-gradient-to-br ${loc.bgGradient} border border-stone-200/80 shadow-xs">
-      <h2 class="text-lg font-black text-stone-800">${loc.icon} ${loc.name}</h2>
-      <p class="text-xs text-stone-600 mt-0.5 leading-relaxed">${loc.desc}</p>
-    </div>
-    ${sceneBodyHtml}
-  `;
-  bindSceneEvents(village, me);
+    }
+  });
 }
 
 // --- 地點 1：農場農田 ---
@@ -2471,13 +2487,179 @@ function openScratchModal(village, me) {
   paintSilverFoil();
 }
 
+const SLEEP_LOCATION_MESSAGE = '請先走回【農場農田 → 🏡 家族農舍】才能上床睡覺喔！';
+
+async function passOutAtTwoAm(me, personalTime) {
+  if (state.isPassOutInProgress || !me || me.isSleeping || me.readyToSleep) return;
+  if (state.activeTab !== 'action') switchTab('action');
+  state.isPassOutInProgress = true;
+  state.passiveMinutesElapsed = 0;
+  const frozenTime = Math.max(
+    1560,
+    toDayTimelineMinutes(personalTime),
+    toDayTimelineMinutes(me.personalTime ?? 360)
+  );
+  state.lastSyncedPersonalTime = Math.max(
+    state.lastSyncedPersonalTime || 0,
+    frozenTime
+  );
+  me.personalTime = frozenTime;
+  me.effectiveTime = frozenTime;
+  const animation = worldMap.beginPassOutAnimation();
+
+  try {
+    const result = await actionPassOut(
+      state.roomId,
+      me.id,
+      state.players,
+      frozenTime
+    );
+    if (result?.alreadySleeping) {
+      const currentMe = getMe() || me;
+      currentMe.isSleeping = true;
+      currentMe.readyToSleep = true;
+      currentMe.personalTime = Math.max(
+        frozenTime,
+        toDayTimelineMinutes(currentMe.personalTime ?? 360)
+      );
+      currentMe.effectiveTime = currentMe.personalTime;
+      currentMe.location = 'farm';
+      currentMe.posX = 210;
+      currentMe.posY = 215;
+      worldMap.cancelPassOutAnimation();
+      state.isPassOutInProgress = false;
+      state.passOutRetryAt = Date.now() + 30_000;
+      renderGameScreen();
+      return;
+    }
+    const currentMe = getMe() || me;
+    if (result?.dayAdvanced) {
+      currentMe.isSleeping = false;
+      currentMe.readyToSleep = false;
+      currentMe.location = 'farm';
+      currentMe.posX = 265;
+      currentMe.posY = 225;
+      resetLocalPersonalClock();
+    } else {
+      currentMe.isSleeping = true;
+      currentMe.readyToSleep = true;
+      currentMe.personalTime = result?.personalTime ?? frozenTime;
+      currentMe.effectiveTime = currentMe.personalTime;
+      currentMe.location = 'farm';
+      currentMe.posX = 210;
+      currentMe.posY = 215;
+    }
+
+    const remaining = Math.max(0, animation.expiresAt - Date.now());
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, remaining));
+    worldMap.finishPassOutAnimation();
+    state.isPassOutInProgress = false;
+    state.passOutRetryAt = 0;
+    renderGameScreen();
+    showToast(
+      result?.dayAdvanced
+        ? '凌晨體力耗盡昏倒，家人將你扛回農舍；天亮後已醒來！'
+        : '凌晨 02:00 體力耗盡，家人已將你扛回農舍床上。',
+      result?.dayAdvanced ? 'success' : 'info'
+    );
+  } catch (err) {
+    console.error(err);
+    worldMap.cancelPassOutAnimation();
+    state.isPassOutInProgress = false;
+    state.passOutRetryAt = Date.now() + 30_000;
+    showToast(err.message || '昏倒回家同步失敗，稍後會自動重試。', 'error');
+  }
+}
+
+function showSleepLocationError() {
+  showToast(SLEEP_LOCATION_MESSAGE, 'info');
+  if (worldMap.canvas) worldMap.spawnFloatingText(SLEEP_LOCATION_MESSAGE, '#fde68a');
+}
+
+async function cancelSleepWait(me) {
+  if (state.isPassOutInProgress) return;
+  if (!me || (!me.readyToSleep && !me.isSleeping)) return;
+  if (!worldMap.isAtSleepSpot()) {
+    showToast('請回到農場家族農舍床鋪旁，才能取消等待。', 'info');
+    return;
+  }
+
+  const frozenTime = getEffectivePersonalTime(me);
+  try {
+    const cancelled = await cancelSleepWaiting(state.roomId, me.id, frozenTime);
+    if (!cancelled) return;
+    state.passiveMinutesElapsed = 0;
+    state.lastSyncedPersonalTime = Math.max(
+      state.lastSyncedPersonalTime || 0,
+      toDayTimelineMinutes(frozenTime)
+    );
+    me.personalTime = frozenTime;
+    me.effectiveTime = frozenTime;
+    worldMap.setLocalSleepWaiting(false);
+    showToast('已取消等待，醒來繼續今天的行程！', 'info');
+    renderGameScreen();
+  } catch (err) {
+    console.error(err);
+    showToast(err.message || '取消睡覺等待失敗，請檢查網路連線。', 'error');
+  }
+}
+
+async function sleepAtHome(me, forceAFK = false) {
+  if (state.isPassOutInProgress) return;
+  if (!worldMap.isAtSleepSpot()) {
+    showSleepLocationError();
+    return;
+  }
+
+  const personalTime = getEffectivePersonalTime(me);
+  state.passiveMinutesElapsed = 0;
+  state.lastSyncedPersonalTime = Math.max(
+    state.lastSyncedPersonalTime || 0,
+    toDayTimelineMinutes(personalTime)
+  );
+  me.personalTime = personalTime;
+  me.effectiveTime = personalTime;
+  const sleepPosition = worldMap.prepareForSleep();
+  worldMap.setLocalSleepWaiting(true);
+  try {
+    await updatePlayerPresence(state.roomId, me.id, {
+      ...sleepPosition,
+      personalTime
+    });
+    const previousDay = state.village?.day;
+    await goToSleepAndMaybeAdvanceDay(
+      state.roomId,
+      me.id,
+      state.players,
+      forceAFK,
+      personalTime
+    );
+    if (previousDay !== undefined && state.village?.day !== previousDay) {
+      resetLocalPersonalClock();
+      worldMap.teleportLocalPlayer('farm', 265, 225);
+      renderGameScreen();
+    }
+    showToast(forceAFK ? '已為全村關燈並結算進入新的一天！' : '已上床休息，等待家人就寢。', forceAFK ? 'success' : 'info');
+  } catch (err) {
+    console.error(err);
+    worldMap.setLocalSleepWaiting(false);
+    showToast(err.message || '上床睡覺失敗，請檢查網路連線。', 'error');
+    renderGameScreen();
+  }
+}
+
 function openSleepModal(village, me) {
+  if (!worldMap.isAtSleepSpot()) {
+    showSleepLocationError();
+    return;
+  }
+
   const now = Date.now();
   const activePlayers = state.players.filter(
     p => p.id === me.id || (now - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS)
   );
   const hasAFK = state.players.some(
-    p => !p.isSleeping && (now - (p.lastActiveAt || 0) > ONLINE_TIMEOUT_MS)
+    p => !p.isSleeping && !p.readyToSleep && (now - (p.lastActiveAt || 0) > ONLINE_TIMEOUT_MS)
   );
 
   const html = `
@@ -2491,8 +2673,8 @@ function openSleepModal(village, me) {
             ${renderAvatarSVG(p.avatarConfig, 26)}
             <span class="font-bold text-stone-800">${escapeHtml(p.name)}</span>
           </div>
-          <span class="font-black ${p.isSleeping ? 'text-indigo-600' : 'text-emerald-600'}">
-            ${p.isSleeping ? '💤 已上床睡覺' : '🏃 活動中'}
+          <span class="font-black ${p.isSleeping || p.readyToSleep ? 'text-indigo-600' : 'text-emerald-600'}">
+            ${p.isSleeping || p.readyToSleep ? '💤 已上床睡覺' : '🏃 活動中'}
           </span>
         </div>
       `).join('')}
@@ -2512,36 +2694,12 @@ function openSleepModal(village, me) {
 
   document.getElementById('btn-confirm-sleep').addEventListener('click', async () => {
     closeGenericModal();
-    const previousDay = state.village?.day;
-    await goToSleepAndMaybeAdvanceDay(
-      state.roomId,
-      me.id,
-      state.players,
-      false,
-      getEffectivePersonalTime(me)
-    );
-    if (previousDay !== undefined && state.village?.day !== previousDay) {
-      resetLocalPersonalClock();
-      renderGameScreen();
-    }
-    showToast('已上床休息！', 'info');
+    await sleepAtHome(me);
   });
 
   document.getElementById('btn-force-sleep')?.addEventListener('click', async () => {
     closeGenericModal();
-    const previousDay = state.village?.day;
-    await goToSleepAndMaybeAdvanceDay(
-      state.roomId,
-      me.id,
-      state.players,
-      true,
-      getEffectivePersonalTime(me)
-    );
-    if (previousDay !== undefined && state.village?.day !== previousDay) {
-      resetLocalPersonalClock();
-      renderGameScreen();
-    }
-    showToast('已為全村關燈並結算進入新的一天！', 'success');
+    await sleepAtHome(me, true);
   });
 }
 
@@ -3297,7 +3455,16 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-nav-sleep').addEventListener('click', () => {
-    if (state.village && getMe()) openSleepModal(state.village, getMe());
+    const me = getMe();
+    if (!state.village || !me) return;
+    if (state.isPassOutInProgress) return;
+    if (me.readyToSleep || me.isSleeping) {
+      cancelSleepWait(me);
+    } else if (!worldMap.isAtSleepSpot()) {
+      showSleepLocationError();
+    } else {
+      openSleepModal(state.village, me);
+    }
   });
 
   document.getElementById('activity-ticker').addEventListener('click', () => {

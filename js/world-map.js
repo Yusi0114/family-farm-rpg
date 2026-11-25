@@ -14,6 +14,7 @@ const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
 const REMOTE_MOVE_SPEED = 180;
 const REMOTE_ACTION_MAX_DELAY_MS = 5000;
 const REMOTE_ACTION_ARRIVAL_RADIUS = 8;
+const FARM_BED_POSITION = { x: 210, y: 215 };
 
 export function toDayTimelineMinutes(rawMins) {
   const mins = Number(rawMins);
@@ -377,6 +378,7 @@ class WorldMapController {
     this.mapBannerTimer = 0;
     this.previewMinutes = null;
     this.activeActionAnim = null;
+    this.passOutAnimation = null;
 
     this.joyVec = { x: 0, y: 0 };
     this.joyActive = false;
@@ -401,7 +403,7 @@ class WorldMapController {
     if (!text) return;
     const stackOffset = this.floatingTexts.length * 22;
     this.floatingTexts.push({
-      text: String(text).slice(0, 22),
+      text: String(text).slice(0, 64),
       color,
       x: this.localPos.x + (Math.random() - 0.5) * 14,
       y: this.localPos.y - 68 - stackOffset,
@@ -546,8 +548,8 @@ class WorldMapController {
       <div id="world-map-wrapper" class="relative w-full h-full rounded-3xl overflow-hidden border-2 border-amber-800/40 shadow-inner bg-emerald-800 select-none" style="touch-action: none;">
         <canvas id="village-canvas" class="w-full h-full block"></canvas>
 
-        <!-- 頂部五大地圖快速切換與家人分布人數列 -->
-        <div id="map-region-pills" class="absolute top-2 left-2 right-2 flex gap-1 overflow-x-auto no-scrollbar pointer-events-auto"></div>
+        <!-- 頂部目前區域與在線家人分布列 -->
+        <div id="map-region-pills" aria-label="目前區域與在線家人分布" class="absolute top-2 left-2 right-2 flex gap-1 overflow-x-auto no-scrollbar pointer-events-auto"></div>
 
         <!-- 漁港專屬：魚餌快速切換條 -->
         <div id="map-bait-bar" class="hidden absolute top-11 left-2 bg-sky-950/85 text-white px-2.5 py-1.5 rounded-2xl text-[11px] flex items-center gap-1.5 backdrop-blur-xs border border-sky-400/40">
@@ -614,6 +616,15 @@ class WorldMapController {
     this.village = village;
     this.players = players;
     if (settings) this.settings = settings;
+    const localPlayer = this.players.find(player => player.id === this.meId);
+    if (!this.passOutAnimation && (localPlayer?.readyToSleep || localPlayer?.isSleeping)) {
+      this.currentMapId = 'farm';
+      this.localPos.x = FARM_BED_POSITION.x;
+      this.localPos.y = FARM_BED_POSITION.y;
+      this.walkTarget = null;
+      this.joyActive = false;
+      this.joyVec = { x: 0, y: 0 };
+    }
     this.renderRegionPills();
     this.rebuildMapEntities();
   }
@@ -665,31 +676,119 @@ class WorldMapController {
       }).length;
 
       return `
-        <button data-tp-region="${m.id}" class="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-black shadow-xs border backdrop-blur-xs transition ${
+        <span aria-current="${isCurrent ? 'location' : 'false'}" class="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-black shadow-xs border backdrop-blur-xs ${
           isCurrent
             ? 'bg-emerald-700 text-white border-amber-300'
-            : 'bg-amber-50/95 active:bg-emerald-600 active:text-white text-stone-800 border-amber-300'
+            : 'bg-amber-50/95 text-stone-800 border-amber-300'
         }">
-          ${m.icon} ${m.name.slice(0, 2)}${count > 0 ? ` (${count})` : ''}
-        </button>
+          ${m.icon} ${m.name} (${count})
+        </span>
       `;
     }).join('');
+  }
 
-    bar.querySelectorAll('[data-tp-region]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const targetId = btn.dataset.tpRegion;
-        const mapDef = SUB_MAPS[targetId];
-        if (mapDef && targetId !== this.currentMapId) {
-          this.switchToMap(targetId, mapDef.spawnX, mapDef.spawnY);
-        }
-      });
-    });
+  isAtSleepSpot() {
+    return this.currentMapId === 'farm' &&
+      Math.hypot(this.localPos.x - FARM_BED_POSITION.x, this.localPos.y - FARM_BED_POSITION.y) <= 64;
+  }
+
+  isLocalSleepLocked() {
+    const me = this.players.find(player => player.id === this.meId);
+    return Boolean(this.passOutAnimation || me?.readyToSleep || me?.isSleeping);
+  }
+
+  beginPassOutAnimation(duration = 2600) {
+    const startedAt = Date.now();
+    const animation = {
+      location: this.currentMapId,
+      posX: Math.round(this.localPos.x),
+      posY: Math.round(this.localPos.y),
+      startedAt,
+      expiresAt: startedAt + duration
+    };
+    let resolve;
+    const completed = new Promise(done => { resolve = done; });
+    this.passOutAnimation = { ...animation, duration, resolve };
+    this.walkTarget = null;
+    this.joyActive = false;
+    this.joyPointerId = null;
+    this.joyVec = { x: 0, y: 0 };
+    return { ...animation, duration, completed };
+  }
+
+  finishPassOutAnimation() {
+    const animation = this.passOutAnimation;
+    this.passOutAnimation = null;
+    const me = this.players.find(player => player.id === this.meId);
+    const isSleeping = Boolean(me?.readyToSleep || me?.isSleeping);
+    const x = isSleeping ? FARM_BED_POSITION.x : 265;
+    const y = isSleeping ? FARM_BED_POSITION.y : 225;
+    this.currentMapId = 'farm';
+    this.localPos.x = x;
+    this.localPos.y = y;
+    this.walkTarget = null;
+    this.dustParticles = [];
+    this.footprints = [];
+    if (me) {
+      me.location = 'farm';
+      me.posX = x;
+      me.posY = y;
+    }
+    this.mapFadeAlpha = 0.85;
+    this.mapBannerText = '🌾 農場農田';
+    this.mapBannerTimer = 2.2;
+    this.renderRegionPills();
+    this.rebuildMapEntities();
+    animation?.resolve?.();
+  }
+
+  cancelPassOutAnimation() {
+    const animation = this.passOutAnimation;
+    this.passOutAnimation = null;
+    animation?.resolve?.();
+  }
+
+  prepareForSleep() {
+    this.currentMapId = 'farm';
+    this.localPos.x = FARM_BED_POSITION.x;
+    this.localPos.y = FARM_BED_POSITION.y;
+    this.walkTarget = null;
+    this.joyActive = false;
+    this.joyPointerId = null;
+    this.joyVec = { x: 0, y: 0 };
+    this.rebuildMapEntities();
+    return { location: 'farm', posX: FARM_BED_POSITION.x, posY: FARM_BED_POSITION.y };
+  }
+
+  setLocalSleepWaiting(ready) {
+    const me = this.players.find(player => player.id === this.meId);
+    if (me) {
+      me.readyToSleep = ready;
+      me.isSleeping = ready;
+      if (ready) {
+        me.location = 'farm';
+        me.posX = FARM_BED_POSITION.x;
+        me.posY = FARM_BED_POSITION.y;
+      }
+    }
+  }
+
+  teleportLocalPlayer(targetMapId, x, y) {
+    if (!SUB_MAPS[targetMapId]) return;
+    const me = this.players.find(player => player.id === this.meId);
+    if (me) {
+      me.location = targetMapId;
+      me.posX = x;
+      me.posY = y;
+      me.readyToSleep = false;
+      me.isSleeping = false;
+    }
+    this.switchToMap(targetMapId, x, y);
   }
 
   switchToMap(targetMapId, spawnX, spawnY) {
     const mapDef = SUB_MAPS[targetMapId];
-    if (!mapDef) return;
+    if (!mapDef || this.isLocalSleepLocked()) return;
 
     this.currentMapId = targetMapId;
     this.localPos.x = spawnX ?? mapDef.spawnX;
@@ -718,6 +817,15 @@ class WorldMapController {
     }
 
     if (this.currentMapId === 'farm') {
+      items.push({
+        id: 'family_bed',
+        type: 'sleep',
+        x: FARM_BED_POSITION.x,
+        y: FARM_BED_POSITION.y,
+        radius: 64,
+        icon: '🛏️',
+        label: '😴 上床睡覺'
+      });
       items.push({
         id: 'farm_house_door',
         type: 'quests',
@@ -865,7 +973,7 @@ class WorldMapController {
     if (joyZone && joyKnob) {
       const maxRadius = 36;
       const updateJoy = (clientX, clientY) => {
-        if (this.activeActionAnim) return;
+        if (this.activeActionAnim || this.isLocalSleepLocked()) return;
         const rect = joyZone.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
@@ -884,7 +992,7 @@ class WorldMapController {
 
       joyZone.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
-        if (this.activeActionAnim) return;
+        if (this.activeActionAnim || this.isLocalSleepLocked()) return;
         this.joyActive = true;
         this.joyPointerId = e.pointerId;
         joyZone.setPointerCapture(e.pointerId);
@@ -909,7 +1017,7 @@ class WorldMapController {
     }
 
     this.canvas.addEventListener('pointerdown', (e) => {
-      if (this.activeActionAnim) return;
+      if (this.activeActionAnim || this.isLocalSleepLocked()) return;
       if (this.settings.controlMode === 'joystick') return;
       const rect = this.canvas.getBoundingClientRect();
       const clickScreenX = e.clientX - rect.left;
@@ -938,6 +1046,11 @@ class WorldMapController {
 
     interactBtn.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (this.passOutAnimation) return;
+      if (this.isLocalSleepLocked()) {
+        this.callbacks.onCancelSleep?.();
+        return;
+      }
       if (this.nearestInteractable && this.callbacks.onInteract) {
         this.callbacks.onInteract(this.nearestInteractable);
       }
@@ -1144,14 +1257,24 @@ class WorldMapController {
       }
     }
 
+    const sleepLocked = this.isLocalSleepLocked();
+    if (sleepLocked) {
+      this.localPos.x = FARM_BED_POSITION.x;
+      this.localPos.y = FARM_BED_POSITION.y;
+      this.walkTarget = null;
+      this.joyActive = false;
+      this.joyPointerId = null;
+      this.joyVec = { x: 0, y: 0 };
+    }
+
     const speed = this.settings.moveSpeed === 'fast' ? 245 : 180;
     let vx = 0;
     let vy = 0;
 
-    if (!this.activeActionAnim && this.joyActive && (Math.abs(this.joyVec.x) > 0.08 || Math.abs(this.joyVec.y) > 0.08)) {
+    if (!sleepLocked && !this.activeActionAnim && this.joyActive && (Math.abs(this.joyVec.x) > 0.08 || Math.abs(this.joyVec.y) > 0.08)) {
       vx = this.joyVec.x * speed;
       vy = this.joyVec.y * speed;
-    } else if (!this.activeActionAnim && this.walkTarget) {
+    } else if (!sleepLocked && !this.activeActionAnim && this.walkTarget) {
       const dx = this.walkTarget.x - this.localPos.x;
       const dy = this.walkTarget.y - this.localPos.y;
       const dist = Math.hypot(dx, dy);
@@ -1302,7 +1425,10 @@ class WorldMapController {
     for (const obj of this.interactables) {
       if (obj.type === 'npc' && npcAtHome) continue;
       const d = Math.hypot(this.localPos.x - obj.x, this.localPos.y - obj.y);
-      if (d <= obj.radius && d < minDist) {
+      if (obj.type === 'sleep' && d <= obj.radius) {
+        minDist = d;
+        closest = obj;
+      } else if (closest?.type !== 'sleep' && d <= obj.radius && d < minDist) {
         minDist = d;
         closest = obj;
       }
@@ -1315,7 +1441,19 @@ class WorldMapController {
     if (btn && iconEl && labelEl) {
       const isRightJoy = this.settings.joystickSide === 'right' && (this.settings.controlMode === 'dual' || this.settings.controlMode === 'joystick');
       const mapDef = SUB_MAPS[this.currentMapId];
-      if (closest) {
+      if (this.passOutAnimation) {
+        btn.className = `absolute bottom-4 ${isRightJoy ? 'left-3' : 'right-3'} max-w-[215px] px-4 py-3 rounded-2xl font-black text-xs shadow-lg border-2 transition-all flex items-center gap-2 bg-stone-700/90 text-amber-100 border-amber-300`;
+        iconEl.textContent = '💫';
+        labelEl.textContent = '體力耗盡，家人正扛你回家…';
+      } else if (this.isLocalSleepLocked()) {
+        btn.className = `absolute bottom-4 ${isRightJoy ? 'left-3' : 'right-3'} max-w-[215px] px-4 py-3 rounded-2xl font-black text-xs shadow-xl border-2 transition-all flex items-center gap-2 bg-amber-600 active:bg-amber-700 text-white border-amber-200`;
+        iconEl.textContent = '☀️';
+        labelEl.textContent = '暫時起床（取消等待）';
+      } else if (closest?.type === 'sleep') {
+        btn.className = `absolute bottom-4 ${isRightJoy ? 'left-3' : 'right-3'} max-w-[215px] px-4 py-3 rounded-2xl font-black text-xs shadow-xl border-2 transition-all flex items-center gap-2 bg-indigo-600 active:bg-indigo-700 text-white border-amber-300 scale-105`;
+        iconEl.textContent = closest.icon;
+        labelEl.textContent = closest.label;
+      } else if (closest) {
         btn.className = `absolute bottom-4 ${isRightJoy ? 'left-3' : 'right-3'} max-w-[215px] px-4 py-3 rounded-2xl font-black text-xs shadow-xl border-2 transition-all flex items-center gap-2 bg-emerald-600 active:bg-emerald-700 text-white border-amber-300 scale-105`;
         iconEl.textContent = closest.icon;
         labelEl.textContent = closest.label;
@@ -1324,6 +1462,34 @@ class WorldMapController {
         iconEl.textContent = mapDef?.icon || '👣';
         labelEl.textContent = `目前：${mapDef?.name || '小鎮'}`;
       }
+    }
+
+    const sleepNavLabel = document.getElementById('sleep-nav-label');
+    const sleepNavButton = document.getElementById('btn-nav-sleep');
+    if (sleepNavLabel && sleepNavButton) {
+      const passingOut = Boolean(this.passOutAnimation);
+      const waiting = !passingOut && this.isLocalSleepLocked();
+      const label = passingOut
+        ? '昏倒中'
+        : waiting
+        ? '暫時起床'
+        : this.isAtSleepSpot()
+          ? '上床睡覺'
+          : '回家睡覺';
+      const icon = passingOut ? '💫' : waiting ? '☀️' : this.isAtSleepSpot() ? '😴' : '🏡';
+      const iconSpan = sleepNavButton.querySelector('span');
+      if (sleepNavLabel.textContent !== label) sleepNavLabel.textContent = label;
+      if (iconSpan && iconSpan.textContent !== icon) iconSpan.textContent = icon;
+      sleepNavButton.classList.toggle('bg-indigo-50', !passingOut && !waiting && this.isAtSleepSpot());
+      sleepNavButton.classList.toggle('bg-amber-50', waiting);
+      const title = passingOut
+        ? '體力耗盡，家人正將你扛回農舍'
+        : waiting
+        ? '在農舍床鋪取消等待'
+        : this.isAtSleepSpot()
+          ? '在家族農舍上床睡覺'
+          : '回到農場家族農舍才能睡覺';
+      if (sleepNavButton.title !== title) sleepNavButton.title = title;
     }
 
     const baitBar = document.getElementById('map-bait-bar');
@@ -1395,23 +1561,46 @@ class WorldMapController {
 
     // 9. 在線家人角色（依 Y 軸前後排序）
     const renderChars = [];
+    const renderNow = Date.now();
     for (const p of this.players) {
       const isMe = p.id === this.meId;
       const isOnline = isMe || (Date.now() - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS);
-      const pLoc = isMe ? this.currentMapId : (p.location || 'town');
+      const passOut = isMe ? this.passOutAnimation : p.passOutAnimation;
+      const isBeingCarried = Boolean(
+        passOut && (isMe || passOut.expiresAt > renderNow) && passOut.location === this.currentMapId
+      );
+      const pLoc = isMe
+        ? this.currentMapId
+        : isBeingCarried
+          ? passOut.location
+          : (p.location || 'town');
       if (!isOnline || pLoc !== this.currentMapId) continue;
 
-      const pos = isMe ? this.localPos : (this.remotePositions.get(p.id) || { x: mapDef.spawnX, y: mapDef.spawnY });
+      const pos = isMe
+        ? this.localPos
+        : isBeingCarried
+          ? { x: passOut.posX, y: passOut.posY }
+          : (this.remotePositions.get(p.id) || { x: mapDef.spawnX, y: mapDef.spawnY });
       const targetX = typeof p.posX === 'number' ? p.posX : 480;
       const targetY = typeof p.posY === 'number' ? p.posY : 365;
       const isMoving = !isMe && Math.hypot(targetX - pos.x, targetY - pos.y) > 4;
-      renderChars.push({ player: p, x: pos.x, y: pos.y, isMe, isMoving });
+      renderChars.push({ player: p, x: pos.x, y: pos.y, isMe, isMoving, passOut: isBeingCarried ? passOut : null });
     }
     renderChars.sort((a, b) => a.y - b.y);
 
+    let sleepingIndex = 0;
     for (const item of renderChars) {
-      this.drawPlayerCharacter(ctx, item.player, item.x, item.y, item.isMe, item.isMoving);
-      if (!item.isMe) {
+      if (item.passOut) {
+        this.drawPassOutCharacter(ctx, item.player, item.x, item.y, item.passOut);
+      } else if (item.player.readyToSleep || item.player.isSleeping) {
+        const bedX = 140 + (sleepingIndex % 5) * 145;
+        const bedY = 220 + Math.floor(sleepingIndex / 5) * 68;
+        this.drawSleepingPlayer(ctx, item.player, bedX, bedY, now);
+        sleepingIndex++;
+      } else {
+        this.drawPlayerCharacter(ctx, item.player, item.x, item.y, item.isMe, item.isMoving);
+      }
+      if (!item.isMe && !item.player.readyToSleep && !item.player.isSleeping) {
         this.drawRemoteActionIndicator(ctx, item.player, item.x, item.y, now);
       }
     }
@@ -1794,9 +1983,9 @@ class WorldMapController {
       ctx.globalAlpha = alpha;
       ctx.lineWidth = 3.5;
       ctx.strokeStyle = '#3b1e0b';
-      ctx.strokeText(ft.text, ft.x, ft.y);
+      ctx.strokeText(ft.text, ft.x, ft.y, 300);
       ctx.fillStyle = ft.color;
-      ctx.fillText(ft.text, ft.x, ft.y);
+      ctx.fillText(ft.text, ft.x, ft.y, 300);
     }
     ctx.restore();
   }
@@ -2236,6 +2425,147 @@ class WorldMapController {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(player.name || '村民', x, y - 54.5 - bobOffset);
+  }
+
+  drawSleepingPlayer(ctx, player, x, y, now) {
+    ctx.save();
+    const breath = Math.sin(now * 0.003 + x) * 1.5;
+
+    ctx.fillStyle = 'rgba(42, 24, 12, 0.28)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 23, 60, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#8b5a2b';
+    roundRectPath(ctx, x - 58, y - 13, 116, 44, 9);
+    ctx.fill();
+    ctx.strokeStyle = '#5b371b';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#fef3c7';
+    roundRectPath(ctx, x - 51, y - 9, 35, 18, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#d6b985';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = '#bf7541';
+    roundRectPath(ctx, x - 12, y - 11 + breath, 62, 33, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#8b4b2b';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 229, 185, 0.75)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x + 2, y - 5 + breath);
+    ctx.quadraticCurveTo(x + 12, y + 1 + breath, x + 3, y + 8 + breath);
+    ctx.moveTo(x + 22, y - 5 + breath);
+    ctx.quadraticCurveTo(x + 32, y + 1 + breath, x + 23, y + 8 + breath);
+    ctx.stroke();
+
+    const sleepingAvatar = { ...(player.avatarConfig || {}), eyes: 'chill' };
+    const portrait = getCachedAvatarImage(
+      `sleep_portrait_${player.id}_${JSON.stringify(sleepingAvatar)}`,
+      renderAvatarSVG(sleepingAvatar, 100)
+    );
+    if (portrait.complete && portrait.naturalWidth > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x - 34, y - 1 + breath, 17, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.drawImage(portrait, 12, 10, 76, 76, x - 51, y - 18 + breath, 34, 34);
+      ctx.restore();
+    }
+
+    ctx.strokeStyle = '#3f2a22';
+    ctx.lineWidth = 1.8;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x - 39, y - 2 + breath);
+    ctx.quadraticCurveTo(x - 36, y + 1 + breath, x - 33, y - 2 + breath);
+    ctx.moveTo(x - 29, y - 2 + breath);
+    ctx.quadraticCurveTo(x - 26, y + 1 + breath, x - 23, y - 2 + breath);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(254, 252, 232, 0.92)';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(player.name || '村民', x, y + 42);
+
+    const bubblePhase = (now * 0.00055 + x * 0.01) % 1;
+    ctx.globalAlpha = 1 - bubblePhase;
+    ctx.fillStyle = '#fef3c7';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.fillText('Zzz', x + 39, y - 18 - bubblePhase * 25);
+    ctx.restore();
+  }
+
+  drawPassOutCharacter(ctx, player, x, y, animation) {
+    ctx.save();
+    const currentTime = Date.now();
+    const progress = Math.max(0, Math.min(1, (currentTime - animation.startedAt) / (animation.expiresAt - animation.startedAt)));
+    const bob = Math.sin(currentTime * 0.018) * 2;
+    const travel = progress * 70;
+    const alpha = progress > 0.82 ? 1 - (progress - 0.82) / 0.18 : 1;
+    ctx.globalAlpha = alpha;
+    ctx.translate(x + travel, y + bob);
+
+    ctx.fillStyle = 'rgba(42, 24, 12, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(0, 24, 66, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#8b5a2b';
+    roundRectPath(ctx, -62, 4, 124, 9, 4);
+    ctx.fill();
+    ctx.strokeStyle = '#5b371b';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    for (const helperX of [-48, 48]) {
+      ctx.fillStyle = '#256d55';
+      roundRectPath(ctx, helperX - 10, -14, 20, 33, 8);
+      ctx.fill();
+      ctx.fillStyle = '#f2c7a5';
+      ctx.beginPath();
+      ctx.arc(helperX, -22, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#5b371b';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.strokeStyle = '#f2c7a5';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(helperX + (helperX < 0 ? 8 : -8), -7);
+      ctx.lineTo(helperX < 0 ? -31 : 31, 7);
+      ctx.stroke();
+    }
+
+    ctx.save();
+    ctx.translate(0, 1);
+    ctx.rotate(-0.35);
+    const avatar = getCachedAvatarImage(
+      `passout_chibi_${player.id}_${JSON.stringify(player.avatarConfig || {})}`,
+      renderChibiPlayerSVG(player.avatarConfig, 0)
+    );
+    if (avatar.complete && avatar.naturalWidth > 0) {
+      ctx.drawImage(avatar, -23, -38, 46, 56);
+    }
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(120, 53, 15, 0.94)';
+    roundRectPath(ctx, -101, -68, 202, 25, 12);
+    ctx.fill();
+    ctx.strokeStyle = '#fde68a';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#fffbeb';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('💫 凌晨 02:00 體力耗盡！', 0, -55.5);
+    ctx.restore();
   }
 
   drawAtmosphere(ctx, now) {

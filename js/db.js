@@ -170,6 +170,7 @@ export async function createPlayer(roomId, playerInput, ownerUid) {
     personalTime: 360, // 06:00 起床（以分鐘計算）
     location: 'farm',
     isSleeping: false,
+    readyToSleep: false,
     isSick: false,
     scratchUsedToday: false,
     popularGiftUsedToday: false,
@@ -273,9 +274,24 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
 
     const me = latestPlayers.find(p => p.id === playerId);
     if (!me) return;
+    if (
+      me.location !== 'farm' ||
+      Math.hypot((me.posX || 0) - 210, (me.posY || 0) - 215) > 75
+    ) {
+      throw new Error('請先回到農場農舍床鋪旁，才能上床睡覺喔！');
+    }
+
     me.isSleeping = true;
+    me.readyToSleep = true;
     me.lastActiveAt = now;
-    const sleepUpdates = { isSleeping: true, lastActiveAt: now };
+    const sleepUpdates = {
+      isSleeping: true,
+      readyToSleep: true,
+      location: 'farm',
+      posX: 210,
+      posY: 215,
+      lastActiveAt: now
+    };
     if (Number.isFinite(personalTime)) {
       me.personalTime = Math.max(360, personalTime);
       sleepUpdates.personalTime = me.personalTime;
@@ -316,6 +332,126 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
       );
       tx.update(roomRef, { activityLogs: logs });
     }
+  });
+}
+
+export async function actionPassOut(roomId, playerId, allPlayersSnapshot, personalTime) {
+  const roomRef = doc(db, 'rooms', roomId);
+  const now = Date.now();
+
+  return await runTransaction(db, async (tx) => {
+    const roomSnap = await tx.get(roomRef);
+    if (!roomSnap.exists()) throw new Error('找不到家庭房間，請重新連線後再試。');
+
+    const latestPlayers = [];
+    for (const p of allPlayersSnapshot) {
+      const pRef = doc(db, 'rooms', roomId, 'players', p.id);
+      const pSnap = await tx.get(pRef);
+      if (pSnap.exists()) {
+        latestPlayers.push({ id: pSnap.id, ref: pRef, ...pSnap.data() });
+      }
+    }
+
+    const me = latestPlayers.find(p => p.id === playerId);
+    if (!me) throw new Error('找不到玩家資料，請重新連線後再試。');
+    if (me.isSleeping || me.readyToSleep) {
+      return { dayAdvanced: false, alreadySleeping: true };
+    }
+    if (!Number.isFinite(personalTime) || personalTime < 1560) {
+      throw new Error('必須到凌晨 02:00 才會因體力耗盡昏倒。');
+    }
+
+    const passOutAnimation = {
+      location: me.location || 'town',
+      posX: Number.isFinite(me.posX) ? me.posX : 480,
+      posY: Number.isFinite(me.posY) ? me.posY : 365,
+      startedAt: now,
+      expiresAt: now + 2600
+    };
+    const passOutTime = Math.max(1560, personalTime, me.personalTime || 360);
+    me.isSleeping = true;
+    me.readyToSleep = true;
+    me.personalTime = passOutTime;
+    me.location = 'farm';
+    me.posX = 210;
+    me.posY = 215;
+    me.lastActiveAt = now;
+
+    const activePlayers = latestPlayers.filter(
+      p => p.id === playerId || (now - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS)
+    );
+    const allActiveSleeping = activePlayers.every(p => p.isSleeping);
+    const passOutLog = `🫠 ${me.name} 凌晨 02:00 體力耗盡，被家人扛回農舍休息。`;
+
+    if (allActiveSleeping) {
+      const village = roomSnap.data();
+      const { villageUpdates, playerUpdatesList, summaryLog } = computeNextDayState(
+        village,
+        latestPlayers,
+        now
+      );
+      villageUpdates.activityLogs = prependLog(
+        prependLog(village.activityLogs, passOutLog, false),
+        summaryLog,
+        true
+      );
+      tx.update(roomRef, villageUpdates);
+      for (const playerUpdate of playerUpdatesList) {
+        tx.update(
+          playerUpdate.ref,
+          playerUpdate.ref.id === playerId
+            ? { ...playerUpdate.updates, passOutAnimation }
+            : playerUpdate.updates
+        );
+      }
+      return { dayAdvanced: true, alreadySleeping: false, personalTime: passOutTime };
+    }
+
+    tx.update(me.ref, {
+      isSleeping: true,
+      readyToSleep: true,
+      personalTime: passOutTime,
+      location: 'farm',
+      posX: 210,
+      posY: 215,
+      passOutAnimation,
+      lastActiveAt: now
+    });
+    tx.update(roomRef, {
+      activityLogs: prependLog(roomSnap.data().activityLogs, passOutLog, false)
+    });
+    return { dayAdvanced: false, alreadySleeping: false, personalTime: passOutTime };
+  });
+}
+
+export async function cancelSleepWaiting(roomId, playerId, personalTime = null) {
+  const playerRef = doc(db, 'rooms', roomId, 'players', playerId);
+  const now = Date.now();
+
+  return await runTransaction(db, async (tx) => {
+    const playerSnap = await tx.get(playerRef);
+    if (!playerSnap.exists()) throw new Error('找不到玩家資料，請重新連線後再試。');
+
+    const player = playerSnap.data();
+    if (
+      player.location !== 'farm' ||
+      Math.hypot((player.posX || 0) - 210, (player.posY || 0) - 215) > 75
+    ) {
+      throw new Error('請回到農場農舍床鋪旁，才能取消等待。');
+    }
+
+    if (!player.readyToSleep && !player.isSleeping) return false;
+
+    const frozenTime = Number.isFinite(personalTime)
+      ? Math.max(player.personalTime || 360, personalTime)
+      : (player.personalTime || 360);
+    tx.update(playerRef, {
+      isSleeping: false,
+      readyToSleep: false,
+      personalTime: frozenTime,
+      lastActiveAt: now
+    });
+    return true;
   });
 }
 
@@ -478,6 +614,10 @@ function computeNextDayState(village, allPlayers, now) {
         stamina: nextStamina,
         personalTime: 360, // 06:00
         isSleeping: false,
+        readyToSleep: false,
+        location: 'farm',
+        posX: 265,
+        posY: 225,
         isSick: caughtCold,
         scratchUsedToday: false,
         popularGiftUsedToday: false,
