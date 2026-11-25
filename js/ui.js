@@ -216,7 +216,7 @@ function getGoogleAuthErrorMessage(err) {
 
 function clearPendingGoogleLogin() {
   try {
-    sessionStorage.removeItem(GOOGLE_LOGIN_PENDING_KEY);
+    localStorage.removeItem(GOOGLE_LOGIN_PENDING_KEY);
   } catch (err) {
     console.error(err);
   }
@@ -3276,7 +3276,7 @@ document.addEventListener('DOMContentLoaded', () => {
     button.textContent = '正在前往 Google 登入…';
     setAuthFeedback('正在開啟 Google 登入頁面…');
     try {
-      sessionStorage.setItem(GOOGLE_LOGIN_PENDING_KEY, '1');
+      localStorage.setItem(GOOGLE_LOGIN_PENDING_KEY, '1');
       await signInWithRedirect(auth, new GoogleAuthProvider());
     } catch (err) {
       console.error(err);
@@ -3329,10 +3329,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let redirectWasPending = false;
   try {
-    redirectWasPending = sessionStorage.getItem(GOOGLE_LOGIN_PENDING_KEY) === '1';
+    redirectWasPending = localStorage.getItem(GOOGLE_LOGIN_PENDING_KEY) === '1';
   } catch (err) {
     console.error(err);
     setAuthFeedback(getGoogleAuthErrorMessage(err), 'error');
+  }
+  if (redirectWasPending) {
+    setAuthFeedback('已返回網站，正在確認 Google 登入結果…');
   }
   getRedirectResult(auth).then(async result => {
     await auth.authStateReady();
