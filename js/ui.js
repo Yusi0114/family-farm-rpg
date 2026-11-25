@@ -92,6 +92,7 @@ const state = {
 };
 
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
+const GOOGLE_LOGIN_PENDING_KEY = 'farm_google_login_pending';
 
 function escapeHtml(str = '') {
   return String(str)
@@ -186,6 +187,39 @@ function showToast(message, type = 'info') {
     el.style.transform = 'translateY(-8px)';
     setTimeout(() => el.remove(), 300);
   }, 2800);
+}
+
+function setAuthFeedback(message, type = 'info') {
+  const feedback = document.getElementById('auth-login-feedback');
+  if (!feedback) return;
+
+  feedback.textContent = message;
+  feedback.className = `mt-2 text-center text-[11px] font-bold ${
+    type === 'error' ? 'break-words text-red-700' : type === 'success' ? 'break-words text-emerald-700' : 'break-words text-stone-500'
+  }`;
+}
+
+function getGoogleAuthErrorMessage(err) {
+  const host = window.location.hostname;
+  if (err?.name === 'SecurityError') {
+    return '瀏覽器封鎖了登入暫存，請使用一般瀏覽器視窗並允許網站儲存登入狀態。';
+  }
+  const messages = {
+    'auth/unauthorized-domain': `網站網域「${host}」未加入 Firebase Authentication 的授權網域。`,
+    'auth/operation-not-allowed': 'Firebase 尚未啟用 Google 登入 Provider。',
+    'auth/network-request-failed': '網路連線失敗，請檢查網路後重試。',
+    'auth/redirect-cancelled-by-user': '登入流程已取消。'
+  };
+  const code = err?.code || 'auth/unknown';
+  return `${messages[code] || 'Google 登入失敗，請檢查 Firebase Authentication 設定。'}（${code}）`;
+}
+
+function clearPendingGoogleLogin() {
+  try {
+    sessionStorage.removeItem(GOOGLE_LOGIN_PENDING_KEY);
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 async function signOutGoogleAccount() {
@@ -3179,6 +3213,7 @@ function handleAuthStateChange(user) {
   if (user) {
     document.getElementById('auth-account-email').textContent = user.email || 'Google 帳號已登入';
     document.getElementById('auth-account-uid').textContent = user.uid;
+    setAuthFeedback(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
     if (previousUid !== user.uid) {
       showToast(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
     }
@@ -3236,11 +3271,20 @@ document.addEventListener('DOMContentLoaded', () => {
   roomInput.value = state.roomId;
 
   document.getElementById('btn-google-login').addEventListener('click', async () => {
+    const button = document.getElementById('btn-google-login');
+    button.disabled = true;
+    button.textContent = '正在前往 Google 登入…';
+    setAuthFeedback('正在開啟 Google 登入頁面…');
     try {
+      sessionStorage.setItem(GOOGLE_LOGIN_PENDING_KEY, '1');
       await signInWithRedirect(auth, new GoogleAuthProvider());
     } catch (err) {
       console.error(err);
-      showToast(err.message || 'Google 登入失敗', 'error');
+      clearPendingGoogleLogin();
+      setAuthFeedback(getGoogleAuthErrorMessage(err), 'error');
+      showToast(getGoogleAuthErrorMessage(err), 'error');
+      button.disabled = false;
+      button.textContent = '🔐 使用 Google 帳號登入';
     }
   });
 
@@ -3283,14 +3327,38 @@ document.addEventListener('DOMContentLoaded', () => {
     `);
   });
 
-  getRedirectResult(auth).catch(err => {
+  let redirectWasPending = false;
+  try {
+    redirectWasPending = sessionStorage.getItem(GOOGLE_LOGIN_PENDING_KEY) === '1';
+  } catch (err) {
     console.error(err);
-    showToast(err.message || 'Google 登入失敗', 'error');
+    setAuthFeedback(getGoogleAuthErrorMessage(err), 'error');
+  }
+  getRedirectResult(auth).then(async result => {
+    await auth.authStateReady();
+    const user = result?.user || auth.currentUser;
+    if (user) {
+      clearPendingGoogleLogin();
+      setAuthFeedback(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
+    } else if (redirectWasPending) {
+      clearPendingGoogleLogin();
+      const message = `Google 頁面已返回，但 Firebase 沒有收到登入帳號。請確認 Google Provider 已啟用，並將「${window.location.hostname}」加入 Firebase 的授權網域。`;
+      setAuthFeedback(message, 'error');
+      showToast(message, 'error');
+    }
+  }).catch(err => {
+    console.error(err);
+    clearPendingGoogleLogin();
+    const message = getGoogleAuthErrorMessage(err);
+    setAuthFeedback(message, 'error');
+    showToast(message, 'error');
   });
 
   onAuthStateChanged(auth, handleAuthStateChange, err => {
     console.error(err);
-    showToast(err.message || '無法確認 Google 登入狀態', 'error');
+    const message = getGoogleAuthErrorMessage(err);
+    setAuthFeedback(message, 'error');
+    showToast(message, 'error');
   });
 
   // 手機鎖屏或切換到其他 App 時自動斷開即時監聽，切回畫面時再恢復連線
