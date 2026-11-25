@@ -188,6 +188,15 @@ function showToast(message, type = 'info') {
   }, 2800);
 }
 
+async function signOutGoogleAccount() {
+  try {
+    await signOut(auth);
+  } catch (err) {
+    console.error(err);
+    showToast(err.message || '登出失敗', 'error');
+  }
+}
+
 /**
  * 統一包裝所有遊戲動作：處理錯誤提示、觸發 d20 擲骰動畫、顯示升級提示
  */
@@ -788,8 +797,17 @@ function renderTopHud(village, me) {
         ${village.toolsSharpenedToday ? '<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">✨磨刀</span>' : ''}
         <button id="btn-toggle-mute" class="text-sm px-1" title="切換音效">${soundFX.isMuted() ? '🔇' : '🔊'}</button>
         <button id="btn-open-settings" class="text-xs font-bold px-1.5 py-0.5 rounded-lg bg-stone-100 text-stone-700">⚙️設定</button>
-        <button id="btn-switch-user" class="text-[10px] text-stone-400 underline ml-1">換人</button>
+        <button id="btn-switch-user" class="text-[10px] text-stone-400 underline ml-1">換角色</button>
       </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-2 mt-1 pt-1 border-t border-stone-100">
+      <div class="min-w-0 truncate text-[10px] font-medium text-stone-500" title="${escapeHtml(state.user?.email || '')}">
+        🔐 Google 帳號：${escapeHtml(state.user?.email || '登入中')}
+      </div>
+      <button id="btn-game-sign-out" class="shrink-0 rounded-lg bg-stone-100 px-2 py-1 text-[10px] font-bold text-stone-600 active:bg-red-100 active:text-red-700">
+        登出
+      </button>
     </div>
   `;
 
@@ -828,6 +846,7 @@ function renderTopHud(village, me) {
 
   document.getElementById('btn-open-settings').addEventListener('click', openSettingsModal);
   document.getElementById('btn-hud-rest-time')?.addEventListener('click', openRestTimeModal);
+  document.getElementById('btn-game-sign-out').addEventListener('click', signOutGoogleAccount);
 }
 
 function renderLocationBar(me) {
@@ -3160,6 +3179,9 @@ function handleAuthStateChange(user) {
   if (user) {
     document.getElementById('auth-account-email').textContent = user.email || 'Google 帳號已登入';
     document.getElementById('auth-account-uid').textContent = user.uid;
+    if (previousUid !== user.uid) {
+      showToast(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
+    }
   }
 
   if (!user || accountChanged) {
@@ -3223,12 +3245,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-google-logout').addEventListener('click', async () => {
-    try {
-      await signOut(auth);
-    } catch (err) {
-      console.error(err);
-      showToast(err.message || '登出失敗', 'error');
-    }
+    await signOutGoogleAccount();
   });
 
   document.getElementById('btn-load-room').addEventListener('click', () => {
