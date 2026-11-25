@@ -37,8 +37,11 @@ export const LIFE_SKILLS = {
     stat: 'perception',
     unlocks: {
       1: '可釣起溪哥、台灣鯛、虱目魚；漁夫可自製蚯蚓餌',
-      4: '可釣起龍虎石斑、白帶魚、紅蟳；漁夫可自製南極蝦餌',
-      7: '可釣起黑鮪魚、野生大龍蝦、傳說櫻花鉤吻鮭；漁夫可自製發光路亞餌'
+      3: '夜間可釣起夜光小管',
+      4: '可釣起龍虎石斑、白帶魚、紅蟳；黃昏可遇見夕陽赤鯮與晚霞花枝；漁夫可自製南極蝦餌',
+      5: '夜間可釣起月光白帶魚',
+      7: '可釣起黑鮪魚、野生大龍蝦、傳說櫻花鉤吻鮭；漁夫可自製發光路亞餌',
+      9: '深夜可挑戰傳說魚王「星斑龍膽石斑」'
     }
   },
   foraging: {
@@ -48,8 +51,9 @@ export const LIFE_SKILLS = {
     stat: 'physique',
     unlocks: {
       1: '海邊趕海（海帶芽、奇怪的石頭）、砍相思木、採山蘇、敲碎石與銅礦',
-      4: '砍伐台灣檜木、採深山香菇、挖掘鐵礦與混濁的原石',
-      7: '採集極品牛樟芝、挖掘金礦、深山秘境尋寶'
+      3: '夜間可在潮間帶撿到夜光蠑螺',
+      4: '砍伐台灣檜木、採深山香菇與夜間螢光仙草葉、挖掘鐵礦與混濁的原石',
+      7: '採集極品牛樟芝與月華紫靈芝、挖掘金礦、深山秘境尋寶'
     }
   },
   cooking: {
@@ -59,8 +63,12 @@ export const LIFE_SKILLS = {
     stat: 'knowledge',
     unlocks: {
       1: '解鎖老湯（海帶芽蛋花湯）、蔥蛋、番茄炒蛋、炒青菜、地瓜稀飯、青草茶',
-      4: '解鎖小管麵線、炸雞排、香菇雞湯、排骨湯、魚湯、滷肉飯、鳳梨酥',
-      7: '解鎖珍珠奶茶、薑母鴨、香煎牛排、迷迭香羊排、厚切豬排、牛樟芝補湯'
+      4: '解鎖小管麵線、炭烤夜光小管、炸雞排、香菇雞湯、排骨湯、魚湯、滷肉飯、鳳梨酥',
+      5: '解鎖香煎月光白帶魚',
+      6: '解鎖五味晚霞花枝',
+      7: '解鎖珍珠奶茶、薑母鴨、香煎牛排、迷迭香羊排、厚切豬排、牛樟芝補湯',
+      8: '解鎖螢光仙草靈芝茶',
+      9: '解鎖清蒸星斑龍膽石斑'
     }
   },
   smithing: {
@@ -237,10 +245,15 @@ export const FISHING_POOL = [
   { itemId: 'strange_stone', minSkill: 1, weight: 10, dc: 10 },
   { itemId: 'hairtail', minSkill: 4, weight: 20, dc: 13 },
   { itemId: 'grouper', minSkill: 4, weight: 18, dc: 13 },
+  { itemId: 'sunset_bream', minSkill: 4, weight: 13, dc: 14, timeWindow: 'dusk' },
+  { itemId: 'dusk_cuttlefish', minSkill: 4, weight: 12, dc: 14, timeWindow: 'dusk' },
+  { itemId: 'night_squid', minSkill: 3, weight: 16, dc: 13, timeWindow: 'night' },
+  { itemId: 'moon_ribbonfish', minSkill: 5, weight: 10, dc: 15, timeWindow: 'night' },
   { itemId: 'mud_crab', minSkill: 5, weight: 15, dc: 14, seasonBonus: 'autumn' },
   { itemId: 'lobster', minSkill: 7, weight: 10, dc: 16 },
   { itemId: 'bluefin_tuna', minSkill: 8, weight: 8, dc: 17 },
-  { itemId: 'formosan_salmon', minSkill: 9, weight: 4, dc: 18 }
+  { itemId: 'formosan_salmon', minSkill: 9, weight: 4, dc: 18 },
+  { itemId: 'starlight_grouper', minSkill: 9, weight: 3, dc: 19, timeWindow: 'night' }
 ];
 
 // 採集掉落池
@@ -249,14 +262,17 @@ export const FORAGING_POOLS = {
     { itemId: 'wakame', minSkill: 1, weight: 55 },
     { itemId: 'strange_stone', minSkill: 1, weight: 25 },
     { itemId: 'squid', minSkill: 1, weight: 15, nightBonusWeight: 30 },
-    { itemId: 'mud_crab', minSkill: 4, weight: 10 }
+    { itemId: 'mud_crab', minSkill: 4, weight: 10 },
+    { itemId: 'glowing_conch', minSkill: 3, weight: 14, timeWindow: 'night' }
   ],
   chop_wood: [
     { itemId: 'acacia_wood', minSkill: 1, weight: 55 },
     { itemId: 'birds_nest_fern', minSkill: 1, weight: 25 },
     { itemId: 'wild_mushroom', minSkill: 3, weight: 20 },
     { itemId: 'hinoki_wood', minSkill: 4, weight: 18 },
-    { itemId: 'antrodia', minSkill: 7, weight: 6 }
+    { itemId: 'antrodia', minSkill: 7, weight: 6 },
+    { itemId: 'firefly_herb', minSkill: 4, weight: 14, timeWindow: 'night' },
+    { itemId: 'moon_reishi', minSkill: 7, weight: 7, timeWindow: 'night' }
   ],
   mine_ore: [
     { itemId: 'stone', minSkill: 1, weight: 45 },

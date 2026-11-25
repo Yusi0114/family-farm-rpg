@@ -14,6 +14,7 @@ import {
 import { db } from './firebase-config.js';
 import { GAME_CONSTANTS, CLASSES } from '../data/classes-traits.js';
 import { ITEMS } from '../data/items-recipes.js';
+import { buildStarterToolsState } from './tool-utils.js';
 import { WEATHER_TYPES, ANIMAL_TYPES } from '../data/skills-actions.js';
 import { SEASONAL_QUESTS, LEGENDARY_PROJECT, BULLETIN_QUEST_POOL } from '../data/npcs-quests.js';
 
@@ -149,6 +150,7 @@ export async function createPlayer(roomId, playerInput) {
   if (classDef?.startingItem) {
     startingInventory.push({ ...classDef.startingItem });
   }
+  const starterTools = buildStarterToolsState({ inventory: startingInventory });
 
   const newPlayer = {
     id: playerId,
@@ -168,9 +170,12 @@ export async function createPlayer(roomId, playerInput) {
     isSleeping: false,
     isSick: false,
     scratchUsedToday: false,
+    popularGiftUsedToday: false,
     dailyNpcChatUsed: {},
+    npcFavor: {},
     dailyBuffs: [],
-    inventory: startingInventory,
+    inventory: starterTools.inventory,
+    tools: starterTools.tools,
     lastActiveAt: Date.now(),
     createdAt: Date.now()
   };
@@ -245,7 +250,7 @@ export async function runGameTransaction(roomId, playerId, updateCallback) {
 /**
  * 切換玩家上床睡覺狀態；若在線玩家全數睡覺則自動執行換日結算
  */
-export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSnapshot, forceAFK = false) {
+export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSnapshot, forceAFK = false, personalTime = null) {
   const roomRef = doc(db, 'rooms', roomId);
   const now = Date.now();
 
@@ -268,7 +273,11 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
     if (!me) return;
     me.isSleeping = true;
     me.lastActiveAt = now;
-    tx.update(me.ref, { isSleeping: true, lastActiveAt: now });
+    const sleepUpdates = { isSleeping: true, lastActiveAt: now };
+    if (Number.isFinite(personalTime)) {
+      me.personalTime = Math.max(360, personalTime);
+      sleepUpdates.personalTime = me.personalTime;
+    }
 
     // 判斷誰是「目前在線玩家」（10 分鐘內有操作）
     const activePlayers = latestPlayers.filter(
@@ -288,9 +297,15 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
       tx.update(roomRef, villageUpdates);
 
       for (const pu of playerUpdatesList) {
-        tx.update(pu.ref, pu.updates);
+        tx.update(
+          pu.ref,
+          pu.ref.id === playerId
+            ? { ...pu.updates, lastActiveAt: now }
+            : pu.updates
+        );
       }
     } else {
+      tx.update(me.ref, sleepUpdates);
       const waitingNames = activePlayers.filter(p => !p.isSleeping).map(p => p.name).join('、');
       const logs = prependLog(
         village.activityLogs,
@@ -463,6 +478,7 @@ function computeNextDayState(village, allPlayers, now) {
         isSleeping: false,
         isSick: caughtCold,
         scratchUsedToday: false,
+        popularGiftUsedToday: false,
         dailyNpcChatUsed: {},
         dailyBuffs: []
       }

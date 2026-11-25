@@ -18,6 +18,7 @@ export const NPCS = {
       { itemId: 'egg', count: 2, text: '阿嬤偷偷塞給你兩顆自家母雞下的土雞蛋！' }
     ],
     greetings: [
+      '「早安呀！今天精神真不錯，要一起出門忙農活嗎？」',
       '「呷飽未？今天田裡收成好不好啊？」',
       '「要買鹽巴、醬油還是麵線？阿嬤算你們便宜一點啦！」',
       '「過年到了，要不要來刮一張刮刮樂試試手氣？」'
@@ -92,6 +93,7 @@ export const NPCS = {
       { itemId: 'stone', count: 5, text: '王村長把村公所多餘的建材碎石交給你拿去修繕農場。' }
     ],
     greetings: [
+      '「早安！一早就看到你這麼有幹勁，村子交給你們真是太放心了！」',
       '「全家人齊心協力把農場經營起來，咱們村子越來越熱鬧了！」',
       '「布告欄跟季節委託就拜託大家啦，完成後全村人都能一起變強！」'
     ]
@@ -281,6 +283,72 @@ export const BULLETIN_QUEST_POOL = [
     desc: '村公所要舉辦剝柚子大賽，急需幾顆飽滿多汁的麻豆文旦！',
     reqItems: [{ itemId: 'pomelo', count: 3 }],
     reward: { money: 920, villageXp: 70, skill: 'farming', skillXp: 60 }
+  },
+  {
+    id: 'quest_dusk_bream',
+    type: 'delivery',
+    title: '🌇 黃昏晚餐加菜',
+    npcId: 'grandma_chen',
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    minVillageLv: 1,
+    desc: '阿嬤今晚想煮鮮魚湯，傍晚去海邊幫我釣幾尾「夕陽赤鯮」回來吧！',
+    reqItems: [{ itemId: 'sunset_bream', count: 2 }],
+    reward: { money: 520, villageXp: 45, skill: 'fishing', skillXp: 35, favor: 12 }
+  },
+  {
+    id: 'quest_night_squid_fest',
+    type: 'delivery',
+    title: '🌙 漁火夜釣小管',
+    npcId: 'captain_hai',
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    minVillageLv: 1,
+    desc: '入夜後漁港燈火一亮，小管就會靠過來！帶「夜光小管」來給海伯瞧瞧。',
+    reqItems: [{ itemId: 'night_squid', count: 2 }],
+    reward: { money: 720, villageXp: 55, skill: 'fishing', skillXp: 45, favor: 15 }
+  },
+  {
+    id: 'quest_grilled_squid_snack',
+    type: 'delivery',
+    title: '🍢 村長的宵夜嘴饞',
+    npcId: 'mayor_wang',
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    minVillageLv: 2,
+    desc: '晚上巡邏完肚子好餓，聽說大廚房剛研發出「炭烤夜光小管」，能幫我烤一份嗎？',
+    reqItems: [{ itemId: 'grilled_night_squid', count: 1 }],
+    reward: { money: 780, villageXp: 60, skill: 'cooking', skillXp: 50, favor: 18 }
+  },
+  {
+    id: 'quest_starlight_grouper',
+    type: 'delivery',
+    title: '🐡 團圓宴的傳說魚王',
+    npcId: 'mayor_wang',
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    minVillageLv: 5,
+    desc: '過年圍爐就缺一條鎮桌大菜！深夜帶路亞餌去碼頭挑戰「星斑龍膽石斑」吧！',
+    reqItems: [{ itemId: 'starlight_grouper', count: 1 }],
+    reward: { money: 1350, villageXp: 100, skill: 'fishing', skillXp: 80, favor: 25 }
+  },
+  {
+    id: 'quest_glowing_conch',
+    type: 'delivery',
+    title: '🐚 珍寶閣的夜光海螺',
+    npcId: 'boss_lin',
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    minVillageLv: 2,
+    desc: '聽說夜晚退潮時的潮間帶能撿到會發光的「夜光蠑螺」，我出高價收購！',
+    reqItems: [{ itemId: 'glowing_conch', count: 2 }],
+    reward: { money: 550, villageXp: 45, skill: 'foraging', skillXp: 40, favor: 14 }
+  },
+  {
+    id: 'quest_firefly_herb',
+    type: 'delivery',
+    title: '🌿 夜間採集螢光藥草',
+    npcId: 'vet_fang',
+    seasons: ['spring', 'summer', 'autumn', 'winter'],
+    minVillageLv: 2,
+    desc: '入夜後深山草叢裡的「螢光仙草葉」藥效最好，能幫我採一些回診所嗎？',
+    reqItems: [{ itemId: 'firefly_herb', count: 2 }],
+    reward: { money: 480, villageXp: 40, skill: 'foraging', skillXp: 40, favor: 14 }
   },
   {
     id: 'bq_winter_ginger_duck',

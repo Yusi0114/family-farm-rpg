@@ -70,3 +70,380 @@ body {
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 8px);
 }
+
+/* 相容舊版 Tailwind 漸層語法，確保所有卡片底色正常顯示 */
+.bg-gradient-to-b.from-amber-100 {
+  background: linear-gradient(180deg, #fef3c7 0%, #fff7ed 50%, #ecfdf5 100%);
+}
+.bg-gradient-to-br.from-emerald-100 {
+  background: linear-gradient(135deg, #d1fae5 0%, #f7fee7 100%);
+}
+.bg-gradient-to-br.from-amber-100 {
+  background: linear-gradient(135deg, #fef3c7 0%, #fefce8 100%);
+}
+.bg-gradient-to-br.from-orange-100 {
+  background: linear-gradient(135deg, #ffedd5 0%, #fffbeb 100%);
+}
+.bg-gradient-to-br.from-sky-100 {
+  background: linear-gradient(135deg, #e0f2fe 0%, #ecfeff 100%);
+}
+.bg-gradient-to-br.from-stone-200 {
+  background: linear-gradient(135deg, #e7e5e4 0%, #ecfdf5 100%);
+}
+.bg-gradient-to-br.from-amber-50 {
+  background: linear-gradient(135deg, #fffbeb 0%, #fff7ed 100%);
+}
+
+/* ================= 方案 B：場景插畫日夜光影與天氣動態特效 ================= */
+.scene-img-dawn {
+  filter: sepia(0.15) saturate(1.15) brightness(1.03);
+}
+.scene-img-day {
+  filter: saturate(1.08) brightness(1.02);
+}
+.scene-img-dusk {
+  filter: sepia(0.32) hue-rotate(-14deg) saturate(1.3) brightness(0.92);
+}
+.scene-img-night {
+  filter: brightness(0.58) contrast(1.12) saturate(0.85) hue-rotate(195deg);
+}
+
+/* 下雨與颱風斜雨動畫 */
+@keyframes rainFall {
+  0% { background-position: 0 0; }
+  100% { background-position: -24px 60px; }
+}
+.weather-rain-overlay {
+  background-image: repeating-linear-gradient(
+    110deg,
+    transparent 0px,
+    transparent 12px,
+    rgba(255, 255, 255, 0.32) 13px,
+    transparent 14px
+  );
+  background-size: 60px 60px;
+  animation: rainFall 0.55s linear infinite;
+}
+
+/* 寒流微雪粒子動畫 */
+@keyframes snowDrift {
+  0% { background-position: 0 0, 20px 10px; }
+  100% { background-position: 30px 80px, -20px 80px; }
+}
+.weather-snow-overlay {
+  background-image:
+    radial-gradient(circle, rgba(255, 255, 255, 0.85) 1.5px, transparent 2px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.65) 1px, transparent 1.5px);
+  background-size: 48px 48px, 32px 32px;
+  animation: snowDrift 3.5s linear infinite;
+}
+
+/* ================= 胡桃木紋 ＋ 復古羊皮紙 RPG 主題風格 ================= */
+:root {
+  --walnut-deep: #3b2110;
+  --walnut-mid: #59351c;
+  --walnut-warm: #6f4324;
+  --walnut-border: #2a160a;
+  --gold-trim: #d97706;
+  --gold-bright: #fbbf24;
+  --parchment-light: #fcf6e8;
+  --parchment-mid: #f4e6c8;
+  --parchment-dark: #e6d1a8;
+  --ink-brown: #3e2723;
+}
+
+body {
+  background-color: #dfd0b4 !important;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(255, 251, 235, 0.45), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(120, 72, 32, 0.04) 0px, rgba(120, 72, 32, 0.04) 1px, transparent 1px, transparent 6px);
+  color: var(--ink-brown);
+}
+
+#app-shell {
+  background: linear-gradient(180deg, var(--parchment-light) 0%, var(--parchment-mid) 100%) !important;
+  border-left: 3px solid var(--walnut-mid);
+  border-right: 3px solid var(--walnut-mid);
+  box-shadow: 0 12px 32px rgba(42, 22, 10, 0.28);
+}
+
+#login-view {
+  background: linear-gradient(180deg, #f7ebd2 0%, #ebd8b3 55%, #dfca9f 100%) !important;
+}
+
+#login-view > div[class*="bg-white"] {
+  background-color: var(--parchment-light) !important;
+  border: 2.5px solid #8d6e63 !important;
+  box-shadow: 0 6px 0 rgba(93, 64, 55, 0.22), 0 10px 20px rgba(42, 22, 10, 0.12) !important;
+}
+
+#top-hud {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0px,
+      rgba(255, 255, 255, 0.03) 2px,
+      transparent 2px,
+      transparent 14px
+    ),
+    linear-gradient(180deg, var(--walnut-warm) 0%, var(--walnut-deep) 100%) !important;
+  border-bottom: 3px solid var(--gold-trim) !important;
+  color: #fef3c7 !important;
+  box-shadow: 0 3px 10px rgba(36, 18, 8, 0.35);
+}
+
+#top-hud .text-stone-800,
+#top-hud .text-stone-700,
+#top-hud .text-stone-600 {
+  color: #fef3c7 !important;
+}
+
+#top-hud .text-stone-500,
+#top-hud .text-stone-400 {
+  color: #fde68a !important;
+}
+
+#top-hud .bg-stone-100,
+#top-hud .bg-amber-50 {
+  background-color: rgba(254, 243, 199, 0.16) !important;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  color: #fef3c7 !important;
+}
+
+/* 底部導覽列：胡桃木質底座與半透明木牌分頁按鈕 */
+#game-view > footer {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0px,
+      rgba(255, 255, 255, 0.03) 3px,
+      transparent 3px,
+      transparent 18px
+    ),
+    linear-gradient(180deg, var(--walnut-mid) 0%, var(--walnut-deep) 100%) !important;
+  border-top: 3px solid var(--gold-trim) !important;
+}
+
+#bottom-nav {
+  background: transparent !important;
+  padding: 6px 8px 8px;
+  gap: 6px;
+}
+
+#bottom-nav .nav-btn {
+  background: rgba(252, 244, 223, 0.14) !important;
+  color: #f3e4c8 !important;
+  border: 1px solid rgba(251, 191, 36, 0.3) !important;
+  box-shadow: 0 2px 0 rgba(30, 14, 5, 0.35), inset 0 1px 0 rgba(255, 251, 235, 0.14);
+  transition: transform 0.12s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+#bottom-nav .nav-btn:active {
+  background: rgba(252, 244, 223, 0.28) !important;
+  transform: translateY(1px) scale(0.97);
+}
+
+#bottom-nav .nav-btn.bg-emerald-50 {
+  background: linear-gradient(180deg, #fcf4df 0%, #edd9b4 100%) !important;
+  color: #4a2c18 !important;
+  border: 1.5px solid var(--gold-bright) !important;
+  box-shadow: 0 2px 0 #78350f, inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  transform: translateY(-1px);
+}
+
+/* 睡覺（換日）按鈕：平時維持半透明微光木牌，按壓時平滑亮起 */
+#bottom-nav #btn-nav-sleep {
+  background: linear-gradient(180deg, rgba(252, 244, 223, 0.16) 0%, rgba(99, 102, 241, 0.24) 100%) !important;
+  color: #fef3c7 !important;
+  border: 1px solid rgba(251, 191, 36, 0.42) !important;
+  box-shadow: 0 2px 0 rgba(30, 14, 5, 0.35), inset 0 1px 0 rgba(255, 251, 235, 0.16);
+  transition: transform 0.12s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, color 0.18s ease;
+}
+
+#bottom-nav #btn-nav-sleep:active {
+  background: linear-gradient(180deg, #fcf4df 0%, #e0e7ff 100%) !important;
+  color: #312e81 !important;
+  border: 1.5px solid var(--gold-bright) !important;
+  box-shadow: 0 1px 0 #4338ca, inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  transform: translateY(1px) scale(0.97);
+}
+
+#main-content .bg-white {
+  background: linear-gradient(180deg, #fdf8ed 0%, #f5e8ce 100%) !important;
+  border: 2px solid #9c7a54 !important;
+  box-shadow: 0 3px 0 rgba(120, 72, 32, 0.18);
+}
+
+#create-char-modal > div,
+#generic-modal > div,
+#settings-modal > div,
+#dice-overlay > div {
+  background: linear-gradient(180deg, #fcf6e8 0%, #f3e4c5 100%) !important;
+  border: 3.5px solid var(--walnut-mid) !important;
+  box-shadow: 0 0 0 2px var(--gold-trim), 0 18px 36px rgba(30, 15, 5, 0.55) !important;
+}
+
+#rpg-dialogue-overlay > div > div:last-child {
+  background: linear-gradient(180deg, #fcf6e8 0%, #f3e4c5 100%) !important;
+  border-color: var(--walnut-mid) !important;
+  box-shadow: 0 0 0 2px var(--gold-trim), 0 18px 36px rgba(30, 15, 5, 0.55) !important;
+}
+
+#create-char-modal > div > div:first-child,
+#generic-modal > div > div:first-child,
+#settings-modal > div > div:first-child {
+  background: linear-gradient(180deg, var(--walnut-warm) 0%, var(--walnut-deep) 100%) !important;
+  border-bottom: 2.5px solid var(--gold-trim) !important;
+  color: #fef3c7 !important;
+}
+
+#create-char-modal > div > div:first-child h3,
+#generic-modal > div > div:first-child h3,
+#settings-modal > div > div:first-child h3 {
+  color: #fef3c7 !important;
+}
+
+#create-char-modal > div > div:first-child button,
+#generic-modal > div > div:first-child button,
+#settings-modal > div > div:first-child button {
+  background-color: #fef3c7 !important;
+  color: var(--walnut-deep) !important;
+  border: 1.5px solid var(--gold-trim);
+}
+
+#main-content::-webkit-scrollbar,
+#generic-modal-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+#main-content::-webkit-scrollbar-thumb,
+#generic-modal-body::-webkit-scrollbar-thumb {
+  background: #a1805b;
+  border-radius: 9999px;
+}
+
+/* ================= 大木頭布告欄與釘紙告示樣式 ================= */
+
+.wooden-board-frame {
+  background: #4a2810;
+  border: 8px solid #3b1e0b;
+  border-radius: 26px;
+  box-shadow:
+    inset 0 0 0 2px #854d27,
+    0 0 0 2px #d97706,
+    0 20px 40px rgba(20, 10, 4, 0.65);
+}
+
+.wooden-board-header {
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.03) 0px,
+      rgba(255, 255, 255, 0.03) 3px,
+      transparent 3px,
+      transparent 16px
+    ),
+    linear-gradient(180deg, #5c3317 0%, #3d200d 100%);
+  border-bottom: 4px solid #2b1507;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35);
+}
+
+.wooden-board-surface {
+  background-color: #7c4a27;
+  background-image:
+    radial-gradient(circle at 50% 35%, rgba(254, 243, 199, 0.16) 0%, rgba(28, 14, 5, 0.35) 100%),
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.04) 0px,
+      rgba(255, 255, 255, 0.04) 2px,
+      transparent 2px,
+      transparent 54px,
+      rgba(32, 15, 5, 0.55) 54px,
+      rgba(32, 15, 5, 0.55) 57px
+    );
+}
+
+.pinned-notice {
+  position: relative;
+  margin-top: 8px;
+  background: linear-gradient(175deg, #fdf8ec 0%, #f5e6c8 85%, #ebd5ad 100%) !important;
+  border: 1.5px solid #b0895a !important;
+  border-radius: 6px 8px 14px 6px !important;
+  padding-top: 18px !important;
+  box-shadow:
+    0 8px 14px rgba(28, 14, 5, 0.45),
+    0 2px 4px rgba(0, 0, 0, 0.25),
+    inset 0 0 18px rgba(180, 130, 70, 0.14) !important;
+  transform: rotate(-1.1deg);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.pinned-notice:nth-of-type(even) {
+  transform: rotate(1.15deg);
+}
+
+.pinned-notice:nth-of-type(3n) {
+  transform: rotate(-0.55deg);
+}
+
+.pinned-notice:active {
+  transform: rotate(0deg) scale(1.01);
+  box-shadow:
+    0 12px 20px rgba(28, 14, 5, 0.55),
+    0 3px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+.board-pin {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  border: 2px solid rgba(40, 15, 5, 0.55);
+  box-shadow:
+    0 4px 5px rgba(20, 10, 4, 0.55),
+    inset -2px -2px 4px rgba(0, 0, 0, 0.35),
+    inset 2px 2px 4px rgba(255, 255, 255, 0.65);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.board-pin::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.pin-color-0 { background: radial-gradient(circle at 35% 35%, #f87171, #b91c1c); }
+.pin-color-1 { background: radial-gradient(circle at 35% 35%, #fde047, #b45309); }
+.pin-color-2 { background: radial-gradient(circle at 35% 35%, #6ee7b7, #047857); }
+
+/* ================= 互動式刮刮樂動畫樣式 ================= */
+@keyframes scratchShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px) rotate(-1deg); }
+  40% { transform: translateX(6px) rotate(1deg); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.animate-scratch-shake {
+  animation: scratchShake 0.35s ease-in-out;
+}
+
+@keyframes foilDissolve {
+  0% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+
+.scratch-foil-dissolve {
+  animation: foilDissolve 0.45s ease-out forwards;
+  pointer-events: none;
+}

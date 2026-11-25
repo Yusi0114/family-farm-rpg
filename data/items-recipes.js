@@ -78,6 +78,9 @@ export const ITEMS = {
   white_quartz: { id: 'white_quartz', name: '通透白水晶', icon: '🤍', category: 'forage_ore', sellPrice: 210 },
   cats_eye: { id: 'cats_eye', name: '貓眼石', icon: '🟢', category: 'forage_ore', sellPrice: 380 },
   taiwan_blue_sapphire: { id: 'taiwan_blue_sapphire', name: '頂級台灣藍寶', icon: '💎', category: 'forage_ore', sellPrice: 680 },
+  glowing_conch: { id: 'glowing_conch', name: '夜光蠑螺', icon: '🐚', category: 'forage_ore', sellPrice: 210, staminaRestore: 12, desc: '夜晚退潮時才會在潮間帶發出微光' },
+  firefly_herb: { id: 'firefly_herb', name: '螢光仙草葉', icon: '🌿', category: 'forage_ore', sellPrice: 180, staminaRestore: 12, desc: '夜間在深山草叢裡閃著微光的藥草' },
+  moon_reishi: { id: 'moon_reishi', name: '月華紫靈芝', icon: '🍄', category: 'forage_ore', sellPrice: 360, staminaRestore: 15, desc: '只在月光下生長的稀有紫靈芝' },
 
   // ================= 漁獲海產 =================
   chub: { id: 'chub', name: '溪哥', icon: '🐟', category: 'fish', sellPrice: 40, staminaRestore: 8 },
@@ -90,6 +93,11 @@ export const ITEMS = {
   lobster: { id: 'lobster', name: '野生大龍蝦', icon: '🦞', category: 'fish', sellPrice: 390, staminaRestore: 22 },
   bluefin_tuna: { id: 'bluefin_tuna', name: '黑鮪魚', icon: '🦈', category: 'fish', sellPrice: 520, staminaRestore: 25 },
   formosan_salmon: { id: 'formosan_salmon', name: '櫻花鉤吻鮭', icon: '👑', category: 'fish', sellPrice: 850, staminaRestore: 30 },
+  night_squid: { id: 'night_squid', name: '夜光小管', icon: '🦑', category: 'fish', sellPrice: 210, staminaRestore: 18, desc: '入夜後在漁港燈火旁出沒' },
+  moon_ribbonfish: { id: 'moon_ribbonfish', name: '月光白帶魚', icon: '🐟', category: 'fish', sellPrice: 280, staminaRestore: 22, desc: '月色映照海面時較容易釣起' },
+  dusk_cuttlefish: { id: 'dusk_cuttlefish', name: '晚霞花枝', icon: '🦑', category: 'fish', sellPrice: 230, staminaRestore: 20, desc: '黃昏時分在港灣覓食的花枝' },
+  sunset_bream: { id: 'sunset_bream', name: '夕陽赤鯮', icon: '🐟', category: 'fish', sellPrice: 260, staminaRestore: 20, desc: '只在夕陽染紅海面時活躍' },
+  starlight_grouper: { id: 'starlight_grouper', name: '星斑龍膽石斑', icon: '🐠', category: 'fish', sellPrice: 900, staminaRestore: 32, desc: '深夜才會現身的傳說魚王' },
 
   // ================= 畜牧產品 =================
   egg: { id: 'egg', name: '土雞蛋', icon: '🥚', category: 'ranch', sellPrice: 40, staminaRestore: 10 },
@@ -120,14 +128,46 @@ export const ITEMS = {
   thick_pork_chop: { id: 'thick_pork_chop', name: '古早味厚切豬排', icon: '🥓', category: 'cooking', sellPrice: 210, staminaRestore: 55 },
   ginger_duck: { id: 'ginger_duck', name: '圍爐暖身薑母鴨', icon: '🍲', category: 'cooking', sellPrice: 220, staminaRestore: 68, buff: { type: 'warm', desc: '冬季進補神品，體力上限暫時 +15' } },
   antrodia_tonic: { id: 'antrodia_tonic', name: '極品牛樟芝補湯', icon: '👑', category: 'cooking', sellPrice: 650, staminaRestore: 90, buff: { type: 'all_check', value: 2, desc: '元氣大補，今日全能力檢定 +2' } },
+  grilled_night_squid: { id: 'grilled_night_squid', name: '炭烤夜光小管', icon: '🍢', category: 'cooking', sellPrice: 480, staminaRestore: 55, desc: '【夜市招牌】整尾夜光小管刷上醬汁炭烤，鮮甜彈牙、香氣四溢。' },
+  pan_fried_ribbonfish: { id: 'pan_fried_ribbonfish', name: '香煎月光白帶魚', icon: '🍱', category: 'cooking', sellPrice: 620, staminaRestore: 65, desc: '【海港家常】魚皮煎得金黃酥脆、魚肉細嫩多汁，配白飯能連吃三碗。' },
+  five_spice_cuttlefish: { id: 'five_spice_cuttlefish', name: '五味晚霞花枝', icon: '🥗', category: 'cooking', sellPrice: 540, staminaRestore: 58, desc: '【辦桌冷盤】川燙晚霞花枝與赤鯮片淋上酸甜五味醬，開胃又爽口。' },
+  steamed_starlight_grouper: { id: 'steamed_starlight_grouper', name: '清蒸星斑龍膽石斑', icon: '🍲', category: 'cooking', sellPrice: 1180, staminaRestore: 95, desc: '【年菜主秀】僅用蔥薑與米酒清蒸深夜魚王，膠質滿滿、全村讚不絕口！' },
+  moon_herb_tea: { id: 'moon_herb_tea', name: '螢光仙草靈芝茶', icon: '🍵', category: 'cooking', sellPrice: 680, staminaRestore: 85, desc: '【夜貓補氣】以螢光仙草葉搭配月華紫靈芝慢火熬煮，喝完精神百倍。' },
 
   // ================= 工具與特殊道具 =================
-  stone_hoe: { id: 'stone_hoe', name: '石製鋤頭', icon: '🪓', category: 'tool', sellPrice: 0 },
-  stone_axe: { id: 'stone_axe', name: '石製伐木斧', icon: '🪓', category: 'tool', sellPrice: 0 },
-  stone_pickaxe: { id: 'stone_pickaxe', name: '石製十字鎬', icon: '⛏️', category: 'tool', sellPrice: 0 },
-  fishing_rod: { id: 'fishing_rod', name: '竹製釣魚竿', icon: '🎣', category: 'tool', sellPrice: 0 },
+  wood_hoe: { id: 'wood_hoe', name: '木製開墾鋤', icon: '🪓', category: 'tool', toolCategory: 'hoe', tier: 'wood', bonus: 0, sellPrice: 0, desc: '村莊發放的基礎木鋤，用來開墾農場荒地。' },
+  wood_watering_can: { id: 'wood_watering_can', name: '木製澆水器', icon: '🪣', category: 'tool', toolCategory: 'watering_can', tier: 'wood', bonus: 0, sellPrice: 0, desc: '村莊發放的基礎木桶澆水器，用來灌溉農田作物。' },
+  wood_pickaxe: { id: 'wood_pickaxe', name: '木製十字鎬', icon: '⛏️', category: 'tool', toolCategory: 'pickaxe', tier: 'wood', bonus: 0, sellPrice: 0, desc: '村莊發放的基礎木鎬，可前往深山古礦坑挖掘基礎礦石。' },
+  wood_axe: { id: 'wood_axe', name: '木製伐木斧', icon: '🪓', category: 'tool', toolCategory: 'axe', tier: 'wood', bonus: 0, sellPrice: 0, desc: '村莊發放的基礎木斧，可在檜木林砍伐木材與採菇。' },
+  wood_fishing_rod: { id: 'wood_fishing_rod', name: '木製釣魚竿', icon: '🎣', category: 'tool', toolCategory: 'fishing_rod', tier: 'wood', bonus: 0, sellPrice: 0, desc: '村莊發放的竹木釣竿，可在海邊碼頭拋竿垂釣。' },
+  wood_trowel: { id: 'wood_trowel', name: '木製趕海鏟', icon: '🥄', category: 'tool', toolCategory: 'trowel', tier: 'wood', bonus: 0, sellPrice: 0, desc: '村莊發放的木柄小鏟，適合在海邊潮間帶翻石趕海。' },
+  stone_hoe: { id: 'stone_hoe', name: '石製開墾鋤', icon: '🪓', category: 'tool', toolCategory: 'hoe', tier: 'stone', bonus: 1, sellPrice: 0, desc: '沉穩耐用的石鋤頭，開墾荒地檢定 +1。' },
+  stone_axe: { id: 'stone_axe', name: '石製伐木斧', icon: '🪓', category: 'tool', toolCategory: 'axe', tier: 'stone', bonus: 1, sellPrice: 0, desc: '綁上鋒利石刃的伐木斧，伐木採集檢定 +1。' },
+  stone_pickaxe: { id: 'stone_pickaxe', name: '石製十字鎬', icon: '⛏️', category: 'tool', toolCategory: 'pickaxe', tier: 'stone', bonus: 1, sellPrice: 0, desc: '以堅硬花崗岩打磨而成的石鎬，挖礦檢定 +1，更容易敲出銅礦與鐵礦。' },
+  stone_watering_can: { id: 'stone_watering_can', name: '石製澆水器', icon: '🪣', category: 'tool', toolCategory: 'watering_can', tier: 'stone', bonus: 1, sellPrice: 0, desc: '石陶燒製的蓄水壺，出水均勻且更有份量。' },
+  stone_fishing_rod: { id: 'stone_fishing_rod', name: '石墜釣魚竿', icon: '🎣', category: 'tool', toolCategory: 'fishing_rod', tier: 'stone', bonus: 1, sellPrice: 0, desc: '加裝打磨石墜的釣竿，拋投更穩、釣魚檢定 +1。' },
+  stone_trowel: { id: 'stone_trowel', name: '石製趕海鏟', icon: '🥄', category: 'tool', toolCategory: 'trowel', tier: 'stone', bonus: 1, sellPrice: 0, desc: '石刃小鏟，撬開礁岩縫隙不費力，趕海檢定 +1。' },
+  fishing_rod: { id: 'fishing_rod', name: '竹製釣魚竿', icon: '🎣', category: 'tool', toolCategory: 'fishing_rod', tier: 'wood', bonus: 0, sellPrice: 0 },
   fancy_ledger: { id: 'fancy_ledger', name: '商人精緻帳本', icon: '📒', category: 'tool', sellPrice: 0 }
 };
+
+export const STARTER_WOOD_TOOLS = [
+  'wood_hoe',
+  'wood_watering_can',
+  'wood_pickaxe',
+  'wood_axe',
+  'wood_fishing_rod',
+  'wood_trowel'
+];
+
+export const TOOL_FORGE_RECIPES = [
+  { resultId: 'stone_pickaxe', fromId: 'wood_pickaxe', toolCategory: 'pickaxe', costMoney: 50, materials: [{ itemId: 'acacia_wood', count: 3 }, { itemId: 'stone', count: 6 }] },
+  { resultId: 'stone_axe', fromId: 'wood_axe', toolCategory: 'axe', costMoney: 50, materials: [{ itemId: 'acacia_wood', count: 3 }, { itemId: 'stone', count: 5 }] },
+  { resultId: 'stone_hoe', fromId: 'wood_hoe', toolCategory: 'hoe', costMoney: 40, materials: [{ itemId: 'acacia_wood', count: 3 }, { itemId: 'stone', count: 5 }] },
+  { resultId: 'stone_watering_can', fromId: 'wood_watering_can', toolCategory: 'watering_can', costMoney: 40, materials: [{ itemId: 'acacia_wood', count: 2 }, { itemId: 'stone', count: 5 }] },
+  { resultId: 'stone_fishing_rod', fromId: 'wood_fishing_rod', toolCategory: 'fishing_rod', costMoney: 50, materials: [{ itemId: 'acacia_wood', count: 4 }, { itemId: 'stone', count: 3 }] },
+  { resultId: 'stone_trowel', fromId: 'wood_trowel', toolCategory: 'trowel', costMoney: 40, materials: [{ itemId: 'acacia_wood', count: 2 }, { itemId: 'stone', count: 4 }] }
+];
 
 export const COOKING_RECIPES = [
   // 初階 (Lv.1 - Lv.3)
@@ -155,7 +195,12 @@ export const COOKING_RECIPES = [
   { id: 'recipe_ginger_duck', resultId: 'ginger_duck', skillReq: 7, dc: 15, ingredients: [{ itemId: 'duck_egg', count: 2 }, { itemId: 'seasoning', count: 1 }] },
   { id: 'recipe_grilled_steak', resultId: 'grilled_steak', skillReq: 8, dc: 16, ingredients: [{ itemId: 'raw_steak', count: 1 }, { itemId: 'seasoning', count: 1 }] },
   { id: 'recipe_lamb_chops', resultId: 'roast_lamb_chops', skillReq: 8, dc: 16, ingredients: [{ itemId: 'raw_lamb', count: 1 }, { itemId: 'seasoning', count: 1 }] },
-  { id: 'recipe_antrodia_tonic', resultId: 'antrodia_tonic', skillReq: 9, dc: 17, ingredients: [{ itemId: 'antrodia', count: 1 }, { itemId: 'raw_chicken', count: 1 }, { itemId: 'seasoning', count: 1 }] }
+  { id: 'recipe_antrodia_tonic', resultId: 'antrodia_tonic', skillReq: 9, dc: 17, ingredients: [{ itemId: 'antrodia', count: 1 }, { itemId: 'raw_chicken', count: 1 }, { itemId: 'seasoning', count: 1 }] },
+  { id: 'recipe_grilled_night_squid', resultId: 'grilled_night_squid', skillReq: 4, dc: 14, ingredients: [{ itemId: 'night_squid', count: 1 }] },
+  { id: 'recipe_pan_fried_ribbonfish', resultId: 'pan_fried_ribbonfish', skillReq: 5, dc: 14, ingredients: [{ itemId: 'moon_ribbonfish', count: 1 }] },
+  { id: 'recipe_five_spice_cuttlefish', resultId: 'five_spice_cuttlefish', skillReq: 6, dc: 15, ingredients: [{ itemId: 'dusk_cuttlefish', count: 1 }, { itemId: 'sunset_bream', count: 1 }] },
+  { id: 'recipe_steamed_starlight_grouper', resultId: 'steamed_starlight_grouper', skillReq: 9, dc: 18, ingredients: [{ itemId: 'starlight_grouper', count: 1 }] },
+  { id: 'recipe_moon_herb_tea', resultId: 'moon_herb_tea', skillReq: 8, dc: 16, ingredients: [{ itemId: 'firefly_herb', count: 2 }, { itemId: 'moon_reishi', count: 1 }] }
 ];
 
 // 季節高價收購趨勢（對應商品類別或特定 ID 賣出時價格倍率）

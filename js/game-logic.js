@@ -7,10 +7,10 @@ import {
 } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 
 import { db } from './firebase-config.js';
-import { runGameTransaction, prependLog } from './db.js';
+import { runGameTransaction, updatePlayerPresence, prependLog } from './db.js';
 import { rollD20, performSkillCheck } from './dice-engine.js';
 import { GAME_CONSTANTS, STATS, CLASSES } from '../data/classes-traits.js';
-import { ITEMS, COOKING_RECIPES, SEASON_TRENDS } from '../data/items-recipes.js';
+import { ITEMS, COOKING_RECIPES, SEASON_TRENDS, TOOL_FORGE_RECIPES } from '../data/items-recipes.js';
 import {
   SKILL_XP_THRESHOLDS,
   PERSONAL_XP_THRESHOLDS,
@@ -30,10 +30,24 @@ import {
   LEGENDARY_PROJECT,
   BULLETIN_QUEST_POOL
 } from '../data/npcs-quests.js';
+import { buildStarterToolsState, getRequiredToolBonus } from './tool-utils.js';
+
+export { buildStarterToolsState, getRequiredToolBonus } from './tool-utils.js';
 
 // ============================================================================
 // 一、 基礎通用輔助函式（體力、時間、經驗升級、背包與倉庫存取）
 // ============================================================================
+
+/**
+ * 將 00:00 至 05:59 的時鐘時間轉為隔日時間軸，避免跨午夜倒退。
+ */
+export function toDayTimelineMinutes(rawMins) {
+  const mins = Number(rawMins);
+  if (!Number.isFinite(mins)) return 360;
+  if (mins >= 1440) return mins; // Preserve already-linearized late-night times.
+  if (mins >= 0 && mins < 360) return mins + 1440;
+  return Math.max(360, mins);
+}
 
 export function getBackpackCapacity(player) {
   const bonus = player.traits?.includes('miser') ? 6 : 0;
@@ -86,6 +100,17 @@ function consumeStaminaAndTime(player, village, baseStamina, baseMinutes, isOutd
     nextPersonalTime: (player.personalTime || 360) + minutesCost,
     staminaSpent: staminaCost
   };
+}
+
+function getMinuteOfDay(totalMinutes) {
+  return ((Math.floor(totalMinutes) % 1440) + 1440) % 1440;
+}
+
+function isTimeWindowOpen(timeWindow, minuteOfDay) {
+  if (!timeWindow) return true;
+  if (timeWindow === 'dusk') return minuteOfDay >= 1020 && minuteOfDay < 1140;
+  if (timeWindow === 'night') return minuteOfDay >= 1140 || minuteOfDay < 360;
+  return false;
 }
 
 /**
@@ -236,8 +261,9 @@ export async function actionFarmPlot(roomId, playerId, plotIndex, seedId = null)
     // 1. 開墾荒廢農地
     if (!plot.cleared) {
       const actionCfg = LOCATION_ACTIONS.farm.find(a => a.id === 'clear_land');
+      const toolBonus = getRequiredToolBonus(player, 'hoe');
       const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(player, village, actionCfg.stamina, actionCfg.minutes, true);
-      const check = performSkillCheck(player, village, actionCfg);
+      const check = performSkillCheck(player, village, { ...actionCfg, toolBonus });
 
       let resultMsg = '';
       let inv = player.inventory;
@@ -281,6 +307,7 @@ export async function actionFarmPlot(roomId, playerId, plotIndex, seedId = null)
       if (!seedId) throw new Error('請先選擇要播種的種子！');
       const seedDef = ITEMS[seedId];
       if (!seedDef || !seedDef.cropId) throw new Error('無效的種子');
+      getRequiredToolBonus(player, 'hoe');
 
       const farmingLv = player.skills?.farming?.level || 1;
       if (farmingLv < (seedDef.skillReq || 1)) {
@@ -377,6 +404,7 @@ export async function actionFarmPlot(roomId, playerId, plotIndex, seedId = null)
       throw new Error(`這塊田的「${cropDef.name}」今天已經澆過水了（成長進度 ${plot.daysGrown}/${growDays} 天）`);
     }
 
+    getRequiredToolBonus(player, 'watering_can');
     const freeStam = isFarmer && Math.random() < 0.25;
     const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(player, village, freeStam ? 0 : 5, 15, true);
     plot.isWatered = true;
@@ -508,14 +536,18 @@ export async function actionBuyAnimal(roomId, playerId, animalType) {
 // 三、 海邊釣魚（含魚餌與漁夫被動）與山海採集挖礦
 // ============================================================================
 
-export async function actionFish(roomId, playerId, baitId = null) {
+export async function actionFish(roomId, playerId, baitId = null, effectiveTime = null) {
   return await runGameTransaction(roomId, playerId, (village, player) => {
     if (WEATHER_TYPES[village.weather]?.lockOutdoor) {
       throw new Error('🌪️ 外面正值狂風暴雨颱風天，港邊已封閉無法出海釣魚！');
     }
 
     const actionCfg = { ...LOCATION_ACTIONS.beach.find(a => a.id === 'go_fishing') };
-    const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(player, village, actionCfg.stamina, actionCfg.minutes, true);
+    actionCfg.toolBonus = getRequiredToolBonus(player, 'fishing_rod');
+    const actionTime = Number.isFinite(effectiveTime) ? effectiveTime : (player.personalTime || 360);
+    const minuteOfDay = getMinuteOfDay(actionTime);
+    const actionPlayer = { ...player, personalTime: actionTime };
+    const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(actionPlayer, village, actionCfg.stamina, actionCfg.minutes, true);
 
     let inv = player.inventory;
     let box = village.warehouse;
@@ -531,11 +563,13 @@ export async function actionFish(roomId, playerId, baitId = null) {
 
     // 篩選符合釣魚等級的魚種並計算權重
     const fishLv = player.skills?.fishing?.level || 1;
-    const isNight = (player.personalTime || 360) >= 1080; // 18:00 後
+    const isNight = minuteOfDay >= 1080 || minuteOfDay < 360;
     const isFisher = player.mainClass === 'fisher';
-    const isThunderAfternoon = village.weather === 'thunderstorm' && (player.personalTime || 360) >= 840;
+    const isThunderAfternoon = village.weather === 'thunderstorm' && minuteOfDay >= 840;
 
-    const candidates = FISHING_POOL.filter(f => fishLv >= f.minSkill).map(f => {
+    const candidates = FISHING_POOL.filter(f =>
+      fishLv >= f.minSkill && isTimeWindowOpen(f.timeWindow, minuteOfDay)
+    ).map(f => {
       let w = isNight && f.nightBonusWeight ? f.nightBonusWeight : f.weight;
       if (f.seasonBonus === village.season) w *= 1.5;
       if (f.minSkill >= 4) {
@@ -549,7 +583,14 @@ export async function actionFish(roomId, playerId, baitId = null) {
     const targetFish = pickWeighted(candidates);
     actionCfg.dc = Math.max(7, targetFish.dc - baitBonus);
 
-    const check = performSkillCheck(player, village, actionCfg);
+    const toolCategoryByAction = {
+      beach_combing: 'trowel',
+      chop_wood: 'axe',
+      mine_ore: 'pickaxe'
+    };
+    const toolCategory = toolCategoryByAction[actionId];
+    const toolBonus = toolCategory ? getRequiredToolBonus(player, toolCategory) : 0;
+    const check = performSkillCheck(player, village, { ...actionCfg, toolBonus });
     let msg = '';
     let caughtId = null;
     let caughtCount = 0;
@@ -633,7 +674,7 @@ export async function actionCraftBait(roomId, playerId, baitId) {
   });
 }
 
-export async function actionForageOrMine(roomId, playerId, actionId) {
+export async function actionForageOrMine(roomId, playerId, actionId, effectiveTime = null) {
   return await runGameTransaction(roomId, playerId, (village, player) => {
     if (WEATHER_TYPES[village.weather]?.lockOutdoor) {
       throw new Error('🌪️ 颱風警報發布中，海邊與深山皆已封閉禁止進入！');
@@ -647,11 +688,14 @@ export async function actionForageOrMine(roomId, playerId, actionId) {
       throw new Error('只有「採集者」具備在深山草叢尋寶的直覺！');
     }
 
-    const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(player, village, actionCfg.stamina, actionCfg.minutes, true);
+    const actionTime = Number.isFinite(effectiveTime) ? effectiveTime : (player.personalTime || 360);
+    const minuteOfDay = getMinuteOfDay(actionTime);
+    const actionPlayer = { ...player, personalTime: actionTime };
+    const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(actionPlayer, village, actionCfg.stamina, actionCfg.minutes, true);
     const check = performSkillCheck(player, village, actionCfg);
     const isForager = player.mainClass === 'forager';
     const forageLv = player.skills?.foraging?.level || 1;
-    const isNight = (player.personalTime || 360) >= 1080;
+    const isNight = minuteOfDay >= 1080 || minuteOfDay < 360;
 
     let inv = player.inventory;
     let box = village.warehouse;
@@ -679,7 +723,9 @@ export async function actionForageOrMine(roomId, playerId, actionId) {
       }
     } else {
       const rawPool = FORAGING_POOLS[actionId] || FORAGING_POOLS.chop_wood;
-      const validPool = rawPool.filter(i => forageLv >= i.minSkill).map(i => ({
+      const validPool = rawPool.filter(i =>
+        forageLv >= i.minSkill && isTimeWindowOpen(i.timeWindow, minuteOfDay)
+      ).map(i => ({
         ...i,
         weight: isNight && i.nightBonusWeight ? i.nightBonusWeight : i.weight
       }));
@@ -900,6 +946,70 @@ export async function actionSmithing(roomId, playerId, mode, targetId = null) {
   });
 }
 
+export async function actionForgeTool(roomId, playerId, resultToolId) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    const recipe = TOOL_FORGE_RECIPES.find(item => item.resultId === resultToolId);
+    if (!recipe) throw new Error('找不到這項工具的鍛造配方！');
+
+    const resultItem = ITEMS[recipe.resultId];
+    if (!resultItem) throw new Error('找不到鍛造後的工具資料！');
+    if ((village.sharedMoney || 0) < recipe.costMoney) {
+      throw new Error(`村莊公款不足 ${recipe.costMoney} 元，無法支付打鐵鋪鍛造費！`);
+    }
+
+    const starter = buildStarterToolsState(player);
+    let inv = starter.inventory;
+    const tools = { ...starter.tools };
+    const itemCount = (itemId) => Array.isArray(inv)
+      ? inv.find(item => (item.itemId || item.id) === itemId)?.count || 0
+      : Number(inv[itemId] || 0);
+
+    if (itemCount(recipe.resultId) > 0 || tools[recipe.toolCategory] === recipe.resultId) {
+      throw new Error(`已經擁有「${resultItem.name}」，不需要重複鍛造！`);
+    }
+    if (itemCount(recipe.fromId) < 1) {
+      throw new Error(`需要先持有「${ITEMS[recipe.fromId]?.name || '前置工具'}」才能進行升級！`);
+    }
+    for (const material of recipe.materials) {
+      const available = itemCount(material.itemId) + Number(village.warehouse?.[material.itemId] || 0);
+      if (available < material.count) {
+        throw new Error(`材料不足：需要「${ITEMS[material.itemId]?.name || material.itemId} ×${material.count}」（目前共有 ${available} 個）`);
+      }
+    }
+
+    let box = village.warehouse || {};
+    ({ inventory: inv, warehouse: box } = consumeItemsSmart(
+      { ...player, inventory: inv },
+      box,
+      recipe.materials
+    ));
+    ({ inventory: inv, warehouse: box } = consumeItemsSmart(
+      { ...player, inventory: inv },
+      box,
+      [{ itemId: recipe.fromId, count: 1 }]
+    ));
+
+    if (Array.isArray(inv)) inv.push({ itemId: recipe.resultId, count: 1 });
+    else inv[recipe.resultId] = (Number(inv[recipe.resultId]) || 0) + 1;
+    tools[recipe.toolCategory] = recipe.resultId;
+
+    const sharedMoney = (village.sharedMoney || 0) - recipe.costMoney;
+    const message = `⚒️ 鍛造成功！獲得【${resultItem.icon} ${resultItem.name}】（檢定 +${resultItem.bonus || 0}）！`;
+    return {
+      villageUpdates: {
+        sharedMoney,
+        warehouse: box,
+        activityLogs: prependLog(village.activityLogs, `⚒️ ${player.name} 在大宇打鐵鋪成功打造出【${resultItem.name}】！`, true)
+      },
+      playerUpdates: { inventory: inv, tools },
+      payload: {
+        message,
+        forgeState: { inventory: inv, tools, sharedMoney, warehouse: box }
+      }
+    };
+  });
+}
+
 // ============================================================================
 // 五、 村莊商業（雜貨採買、商人議價賣貨、NPC 聊天人氣王送禮、每日刮刮樂）
 // ============================================================================
@@ -1007,31 +1117,44 @@ export async function actionChatNpc(roomId, playerId, npcId) {
     const greeting = npc.greetings[Math.floor(Math.random() * npc.greetings.length)];
     const isPopular = player.traits?.includes('popular');
     const usedMap = { ...(player.dailyNpcChatUsed || {}) };
+    const alreadyClaimedToday = Boolean(player.popularGiftUsedToday) || Object.keys(usedMap).length > 0;
+
     let inv = player.inventory;
     let box = village.warehouse;
-    let giftText = '';
+    let giftInfo = null;
 
-    // 特性「人氣王」：每天首次與該村民聊天獲得小禮物
-    if (isPopular && !usedMap[npcId] && npc.popularGifts?.length) {
+    // 特性「人氣王」：每天只能向其中一位村民領取一份小禮物
+    if (isPopular && !alreadyClaimedToday && npc.popularGifts?.length) {
       usedMap[npcId] = true;
       const gift = npc.popularGifts[Math.floor(Math.random() * npc.popularGifts.length)];
       ({ inventory: inv, warehouse: box } = giveItemsSmart(player, box, gift.itemId, gift.count));
-      giftText = `\n🌻【人氣王觸發】${gift.text}（獲得 ${ITEMS[gift.itemId].name} x${gift.count}）`;
+      giftInfo = {
+        text: gift.text,
+        itemId: gift.itemId,
+        count: gift.count
+      };
     }
 
-    const msg = `${npc.name}：${greeting}${giftText}`;
+    const msg = `${npc.name}：${greeting}${giftInfo ? `（人氣王獲得 ${ITEMS[giftInfo.itemId].name} x${giftInfo.count}）` : ''}`;
     return {
-      villageUpdates: giftText
+      villageUpdates: giftInfo
         ? {
             warehouse: box,
-            activityLogs: prependLog(village.activityLogs, `🌻 ${player.name} 發揮人氣王魅力，從${npc.name}那裡收到了小禮物！`, false)
+            activityLogs: prependLog(village.activityLogs, `🌻 ${player.name} 發揮人氣王魅力，從${npc.name}那裡收到了今日的小禮物！`, false)
           }
         : null,
       playerUpdates: {
+        popularGiftUsedToday: Boolean(alreadyClaimedToday || giftInfo),
         dailyNpcChatUsed: usedMap,
         inventory: inv
       },
-      payload: { message: msg }
+      payload: {
+        isDialogue: true,
+        npcId,
+        greeting,
+        giftInfo,
+        message: msg
+      }
     };
   });
 }
@@ -1299,12 +1422,20 @@ export async function interactBulletinQuest(roomId, playerId, questIndex) {
     let nextMoney = village.sharedMoney || 0;
     let vXp = { villageLevel: village.villageLevel || 1, villageXp: village.villageXp || 0 };
     let xpRes = null;
+    let nextNpcFavor = null;
 
     if (completed) {
       board.splice(questIndex, 1); // 移除已完成委託，隔天早上自動補新題目
       nextMoney += questDef.reward.money || 0;
       vXp = grantVillageXp(village, questDef.reward.villageXp || 30);
       xpRes = grantExperience(player, questDef.reward.skill, questDef.reward.skillXp || 30, 18);
+      const favorReward = questDef.reward.favor || 0;
+      if (favorReward > 0) {
+        nextNpcFavor = {
+          ...(player.npcFavor || {}),
+          [questDef.npcId]: ((player.npcFavor || {})[questDef.npcId] || 0) + favorReward
+        };
+      }
 
       if (questDef.reward.bonusItem) {
         ({ inventory: inv, warehouse: box } = giveItemsSmart(
@@ -1316,7 +1447,10 @@ export async function interactBulletinQuest(roomId, playerId, questIndex) {
       }
     }
 
-    const msg = `布告欄委託【${questDef.title}】：${progressNote}${completed ? `（全村獲得 ${questDef.reward.money} 元公款！）` : ''}`;
+    const favorReward = completed ? (questDef.reward.favor || 0) : 0;
+    const msg = `布告欄委託【${questDef.title}】：${progressNote}${completed
+      ? `（全村獲得 ${questDef.reward.money} 元公款！${favorReward ? ` ${NPCS[questDef.npcId]?.name || '委託人'}好感 +${favorReward}！` : ''}）`
+      : ''}`;
     return {
       villageUpdates: {
         bulletinQuests: board,
@@ -1329,6 +1463,7 @@ export async function interactBulletinQuest(roomId, playerId, questIndex) {
       playerUpdates: {
         ...timeUpdates,
         inventory: inv,
+        ...(nextNpcFavor ? { npcFavor: nextNpcFavor } : {}),
         ...(xpRes ? { skills: xpRes.skills, level: xpRes.level, xp: xpRes.xp, freeStatPoints: xpRes.freeStatPoints } : {})
       },
       payload: { check, message: msg, levelUpNotes: xpRes?.levelUpNotes || [] }
@@ -1521,6 +1656,46 @@ export async function allocateFreeStatPoint(roomId, playerId, statKey) {
         stamina: statKey === 'physique' ? player.stamina + 10 : player.stamina
       },
       payload: { message: `已將「${STATS[statKey].name}」提升至 +${nextStats[statKey]}！` }
+    };
+  });
+}
+
+/**
+ * 免費歇息快轉個人時段，只允許向前推進。
+ */
+export async function actionRestFastForward(roomId, playerId, targetMinutes, clientCurrentMinutes = null) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    if (player.isSleeping) {
+      throw new Error('你已經上床休息等待換日了，無法再調整時間喔！');
+    }
+
+    const dbMins = toDayTimelineMinutes(player.personalTime ?? 360);
+    const clientMins = typeof clientCurrentMinutes === 'number'
+      ? toDayTimelineMinutes(clientCurrentMinutes)
+      : dbMins;
+    const curMins = Math.max(dbMins, clientMins);
+    const nextMins = Math.min(1560, toDayTimelineMinutes(targetMinutes));
+
+    if (nextMins <= curMins) {
+      throw new Error('時間只能往前推進，不能倒轉回去喔！');
+    }
+
+    const displayMins = nextMins % 1440;
+    const hh = String(Math.floor(displayMins / 60)).padStart(2, '0');
+    const mm = String(displayMins % 60).padStart(2, '0');
+    const periodLabel =
+      nextMins < 540 ? '🌅 清晨' :
+      nextMins < 1020 ? '☀️ 白天' :
+      nextMins < 1140 ? '🌇 黃昏' :
+      nextMins < 1440 ? '🌙 夜晚' : '🦉 深夜';
+
+    return {
+      playerUpdates: { personalTime: nextMins },
+      payload: {
+        fromMins: curMins,
+        toMins: nextMins,
+        message: `🪑 歇息片刻，時間來到 ${hh}:${mm}（${periodLabel}）！`
+      }
     };
   });
 }

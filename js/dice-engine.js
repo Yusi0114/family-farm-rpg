@@ -34,6 +34,12 @@ export function calculateCheckModifiers(player, villageState, actionConfig) {
     breakdown.push({ label: `${playerClass.name}專精`, value: playerClass.checkBonus });
   }
 
+  const toolBonus = Number(actionConfig.toolBonus) || 0;
+  if (toolBonus !== 0) {
+    totalMod += toolBonus;
+    breakdown.push({ label: '工具加值', value: toolBonus });
+  }
+
   // 3. 生活技能熟練度階梯加值 (Lv.4 +1, Lv.7 +2, Lv.10 +3)
   const skillLevel = player.skills?.[actionConfig.skill]?.level || 1;
   const skillTierBonus = Math.floor((skillLevel - 1) / 3);
