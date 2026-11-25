@@ -17,6 +17,14 @@ import {
   SCRATCH_CARD_COST
 } from '../data/skills-actions.js';
 import { NPCS, SEASONAL_QUESTS, LEGENDARY_PROJECT, BULLETIN_QUEST_POOL } from '../data/npcs-quests.js';
+import { auth } from './firebase-config.js';
+import {
+  GoogleAuthProvider,
+  getRedirectResult,
+  onAuthStateChanged,
+  signInWithRedirect,
+  signOut
+} from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
 
 import { AVATAR_OPTIONS, getDefaultAvatarConfig, renderAvatarSVG, renderNpcAvatarSVG } from './avatar-svg.js';
 import { calculateCheckModifiers } from './dice-engine.js';
@@ -63,6 +71,7 @@ import {
 const state = {
   roomId: localStorage.getItem('farm_room_id') || '2027HAPPY',
   playerId: localStorage.getItem('farm_player_id') || null,
+  user: null,
   village: null,
   players: [],
   activeTab: 'action',
@@ -270,6 +279,10 @@ function renderIngredientStatus(ingredients, player, warehouse) {
 
 async function connectToRoom(roomIdInput, autoLoginPlayerId = null) {
   if (state.isConnecting) return;
+  if (!state.user) {
+    showToast('請先使用 Google 帳號登入，再進入村莊！', 'error');
+    return;
+  }
   const cleanRoom = roomIdInput.trim().toUpperCase();
   if (!cleanRoom) {
     showToast('請輸入家庭房間代碼！', 'error');
@@ -311,6 +324,10 @@ async function connectToRoom(roomIdInput, autoLoginPlayerId = null) {
       (playersList) => {
         state.players = playersList;
         const meNow = playersList.find(p => p.id === state.playerId);
+        if (meNow && meNow.ownerUid !== state.user?.uid) {
+          state.playerId = null;
+          localStorage.removeItem('farm_player_id');
+        }
         if (meNow && typeof meNow.personalTime === 'number') {
           const incomingTimeline = toDayTimelineMinutes(meNow.personalTime);
           if (state.lastSyncedPersonalTime === null || incomingTimeline > state.lastSyncedPersonalTime) {
@@ -322,13 +339,15 @@ async function connectToRoom(roomIdInput, autoLoginPlayerId = null) {
           meNow.effectiveTime = getEffectivePersonalTime(meNow);
         }
         renderLoginPlayerCards();
-        if (autoLoginPlayerId && playersList.some(p => p.id === autoLoginPlayerId)) {
+        if (autoLoginPlayerId && playersList.some(
+          p => p.id === autoLoginPlayerId && p.ownerUid === state.user?.uid
+        )) {
           if (state.playerId !== autoLoginPlayerId || document.getElementById('game-view').classList.contains('hidden')) {
             enterGameAsPlayer(autoLoginPlayerId);
-          } else if (getMe()) {
+          } else if (getMe()?.ownerUid === state.user?.uid) {
             renderGameScreen();
           }
-        } else if (getMe()) {
+        } else if (getMe()?.ownerUid === state.user?.uid) {
           renderGameScreen();
         }
       }
@@ -345,6 +364,14 @@ async function connectToRoom(roomIdInput, autoLoginPlayerId = null) {
 
 function renderLoginPlayerCards() {
   const container = document.getElementById('existing-players-list');
+  if (!state.user) {
+    container.innerHTML = `
+      <div class="col-span-2 text-center py-6 bg-white/70 rounded-2xl border border-stone-200 text-xs text-stone-500">
+        請先使用自己的 Google 帳號登入，再選擇或建立角色。
+      </div>
+    `;
+    return;
+  }
   if (!state.players.length) {
     container.innerHTML = `
       <div class="col-span-2 text-center py-6 bg-white/70 rounded-2xl border border-stone-200 text-xs text-stone-500">
@@ -357,8 +384,14 @@ function renderLoginPlayerCards() {
   container.innerHTML = state.players.map(p => {
     const cls = CLASSES[p.mainClass];
     const isOnline = Date.now() - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS;
+    const canControl = p.ownerUid === state.user.uid;
+    const ownershipStatus = canControl
+      ? '你的角色'
+      : p.ownerUid
+        ? '由其他帳號管理'
+        : '需管理員設定所有者';
     return `
-      <button data-login-player="${p.id}" class="bg-white active:bg-emerald-50 border border-stone-200 rounded-2xl p-2.5 flex items-center gap-2.5 text-left shadow-xs transition">
+      <button ${canControl ? `data-login-player="${p.id}"` : 'disabled'} class="bg-white ${canControl ? 'active:bg-emerald-50' : 'opacity-65'} border border-stone-200 rounded-2xl p-2.5 flex items-center gap-2.5 text-left shadow-xs transition">
         ${renderAvatarSVG(p.avatarConfig, 46)}
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-1">
@@ -366,6 +399,7 @@ function renderLoginPlayerCards() {
             <span class="font-black text-sm text-stone-800 truncate">${escapeHtml(p.name)}</span>
           </div>
           <div class="text-[11px] text-stone-500 font-medium mt-0.5">${cls?.icon || ''} ${cls?.name || ''} · Lv.${p.level || 1}</div>
+          <div class="text-[10px] ${canControl ? 'text-emerald-700' : 'text-amber-700'} font-bold mt-0.5">${ownershipStatus}</div>
         </div>
       </button>
     `;
@@ -377,6 +411,11 @@ function renderLoginPlayerCards() {
 }
 
 function enterGameAsPlayer(playerId) {
+  const player = state.players.find(p => p.id === playerId);
+  if (!state.user || !player || player.ownerUid !== state.user.uid) {
+    showToast('這個角色尚未指派給你的 Google 帳號，無法操作。', 'error');
+    return;
+  }
   if (state.playerId !== playerId) {
     state.passiveMinutesElapsed = 0;
     state.lastSyncedPersonalTime = null;
@@ -403,7 +442,10 @@ function enterGameAsPlayer(playerId) {
   document.getElementById('login-view').classList.add('hidden');
   document.getElementById('game-view').classList.remove('hidden');
 
-  updatePlayerPresence(state.roomId, playerId);
+  updatePlayerPresence(state.roomId, playerId).catch(err => {
+    console.error(err);
+    showToast(err.message || '角色狀態同步失敗，請檢查網路連線', 'error');
+  });
   startPassiveClockTimer();
   if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
   state.heartbeatTimer = setInterval(() => {
@@ -426,6 +468,10 @@ function enterGameAsPlayer(playerId) {
 let draftChar = null;
 
 function openCreateCharModal() {
+  if (!state.user) {
+    showToast('請先使用 Google 帳號登入，再建立角色。', 'error');
+    return;
+  }
   if (!state.village) {
     showToast('請先點擊「進入村莊」連線房間！', 'error');
     return;
@@ -627,6 +673,10 @@ function renderCreateCharForm() {
 }
 
 async function handleSubmitCreateChar() {
+  if (!state.user) {
+    showToast('請先使用 Google 帳號登入，再建立角色。', 'error');
+    return;
+  }
   if (!draftChar.name.trim()) {
     showToast('請幫你的村民取一個暱稱！', 'error');
     return;
@@ -638,7 +688,9 @@ async function handleSubmitCreateChar() {
   }
 
   try {
-    const created = await createPlayer(state.roomId, draftChar);
+    const created = await createPlayer(state.roomId, draftChar, state.user.uid);
+    state.players = [...state.players, created];
+    renderLoginPlayerCards();
     document.getElementById('create-char-modal').classList.add('hidden');
     showToast(`歡迎 ${created.name} 加入村莊！公款 +300 元`, 'success');
     enterGameAsPlayer(created.id);
@@ -848,7 +900,7 @@ function renderActionTab(village, me) {
 
     // 保留已掛載的 Canvas，避免資料更新時中斷角色移動
     if (document.getElementById('village-canvas')) {
-      worldMap.updateData(village, state.players, state.settings);
+      worldMap.updateData(village, state.players, state.settings, me);
       return;
     }
 
@@ -861,6 +913,7 @@ function renderActionTab(village, me) {
       callbacks: {
         getSelectedBait: () => state.selectedBait,
         onBaitChange: (val) => { state.selectedBait = val; },
+        onMovementSyncError: () => showToast('角色位置同步遭拒；請確認 Firebase 已部署角色所有權規則。', 'error'),
         onInteract: (obj) => {
           const curVillage = state.village;
           const curMe = getMe();
@@ -3093,11 +3146,90 @@ function playGenshinClockTransition(fromMins, toMins) {
 // 十、 啟動綁定
 // ============================================================================
 
+function handleAuthStateChange(user) {
+  const previousUid = state.user?.uid;
+  const accountChanged = Boolean(user && previousUid && previousUid !== user.uid);
+  state.user = user;
+
+  const loginButton = document.getElementById('btn-google-login');
+  const accountStatus = document.getElementById('auth-account-status');
+  document.getElementById('btn-open-create-char').disabled = !user;
+  loginButton.classList.toggle('hidden', Boolean(user));
+  accountStatus.classList.toggle('hidden', !user);
+
+  if (user) {
+    document.getElementById('auth-account-email').textContent = user.email || 'Google 帳號已登入';
+    document.getElementById('auth-account-uid').textContent = user.uid;
+  }
+
+  if (!user || accountChanged) {
+    if (state.unsubRoom) {
+      state.unsubRoom();
+      state.unsubRoom = null;
+    }
+    if (state.heartbeatTimer) {
+      clearInterval(state.heartbeatTimer);
+      state.heartbeatTimer = null;
+    }
+    if (state.passiveClockTimer) {
+      clearInterval(state.passiveClockTimer);
+      state.passiveClockTimer = null;
+    }
+    worldMap.unmount();
+    state.playerId = null;
+    state.village = null;
+    state.players = [];
+    document.getElementById('game-view').classList.add('hidden');
+    document.getElementById('login-view').classList.remove('hidden');
+
+    if (previousUid || accountChanged) {
+      localStorage.removeItem('farm_player_id');
+    }
+  }
+
+  renderLoginPlayerCards();
+  if (!user) {
+    const badge = document.getElementById('room-status-badge');
+    if (badge) badge.textContent = '請先使用 Google 帳號登入';
+    return;
+  }
+
+  if (!state.unsubRoom) {
+    connectToRoom(state.roomId, localStorage.getItem('farm_player_id'));
+    return;
+  }
+
+  const savedPlayerId = localStorage.getItem('farm_player_id');
+  if (savedPlayerId && state.players.some(
+    p => p.id === savedPlayerId && p.ownerUid === user.uid
+  )) {
+    enterGameAsPlayer(savedPlayerId);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('pointerdown', () => soundFX.unlock(), { once: true });
 
   const roomInput = document.getElementById('room-code-input');
   roomInput.value = state.roomId;
+
+  document.getElementById('btn-google-login').addEventListener('click', async () => {
+    try {
+      await signInWithRedirect(auth, new GoogleAuthProvider());
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Google 登入失敗', 'error');
+    }
+  });
+
+  document.getElementById('btn-google-logout').addEventListener('click', async () => {
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || '登出失敗', 'error');
+    }
+  });
 
   document.getElementById('btn-load-room').addEventListener('click', () => {
     connectToRoom(roomInput.value, null);
@@ -3134,10 +3266,15 @@ document.addEventListener('DOMContentLoaded', () => {
     `);
   });
 
-  // 自動連線上次進入的家庭房間
-  if (state.roomId) {
-    connectToRoom(state.roomId, state.playerId);
-  }
+  getRedirectResult(auth).catch(err => {
+    console.error(err);
+    showToast(err.message || 'Google 登入失敗', 'error');
+  });
+
+  onAuthStateChanged(auth, handleAuthStateChange, err => {
+    console.error(err);
+    showToast(err.message || '無法確認 Google 登入狀態', 'error');
+  });
 
   // 手機鎖屏或切換到其他 App 時自動斷開即時監聽，切回畫面時再恢復連線
   document.addEventListener('visibilitychange', () => {

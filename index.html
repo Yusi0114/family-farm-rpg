@@ -54,6 +54,25 @@
         <p class="text-[11px] text-stone-400 mt-1.5">全家人輸入相同的房間代碼，就能進入同一個村莊一起經營！</p>
       </div>
 
+      <div class="bg-white/95 rounded-2xl p-3 shadow-md border border-amber-200 mb-4">
+        <button id="btn-google-login" class="w-full py-2.5 rounded-xl bg-stone-800 active:bg-stone-900 text-white font-bold text-sm">
+          🔐 使用 Google 帳號登入
+        </button>
+        <div id="auth-account-status" class="hidden">
+          <div class="flex items-center justify-between gap-2">
+            <div class="min-w-0">
+              <div id="auth-account-email" class="truncate text-xs font-bold text-stone-700"></div>
+              <div class="text-[10px] text-stone-500">帳號 UID（管理員設定舊角色所有權）</div>
+              <div id="auth-account-uid" class="break-all select-text text-[10px] text-stone-500"></div>
+            </div>
+            <button id="btn-google-logout" class="shrink-0 px-3 py-2 rounded-xl bg-stone-100 text-stone-700 font-bold text-xs">
+              登出
+            </button>
+          </div>
+        </div>
+        <p class="text-[10px] text-stone-500 mt-1.5">每位家人使用自己的 Google 帳號；新角色只允許建立者的帳號操作。</p>
+      </div>
+
       <!-- 已有角色認領列表 -->
       <div id="player-select-section" class="flex-1 flex flex-col min-h-0">
         <div class="flex items-center justify-between mb-2">
@@ -67,7 +86,8 @@
 
         <button
           id="btn-open-create-char"
-          class="mt-3 w-full py-3 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-100/70 active:bg-amber-200 text-amber-900 font-bold text-sm flex items-center justify-center gap-1.5 transition"
+          disabled
+          class="mt-3 w-full py-3 rounded-2xl border-2 border-dashed border-amber-400 bg-amber-100/70 active:bg-amber-200 text-amber-900 font-bold text-sm flex items-center justify-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span>➕ 建立新村民角色（自訂紙娃娃）</span>
         </button>

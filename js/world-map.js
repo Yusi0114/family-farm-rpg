@@ -379,6 +379,7 @@ class WorldMapController {
 
     this.lastSyncTime = 0;
     this.dirtySync = false;
+    this.positionSyncErrorShown = false;
     this.lastSyncedPos = { x: 0, y: 0 };
     this.pendingSyncTimer = null;
 
@@ -466,6 +467,9 @@ class WorldMapController {
   mount(containerEl, context) {
     this.unmount();
 
+    if (this.meId && this.meId !== context.me.id) {
+      this.localPos.initialized = false;
+    }
     this.roomId = context.roomId;
     this.village = context.village;
     this.players = context.players;
@@ -541,7 +545,29 @@ class WorldMapController {
     this.loop(this.lastFrameTime);
   }
 
-  updateData(village, players, settings) {
+  updateData(village, players, settings, me) {
+    if (me && me.id !== this.meId) {
+      this.meId = me.id;
+      const startMapId = SUB_MAPS[me.location] ? me.location : 'town';
+      const mapDef = SUB_MAPS[startMapId];
+      this.currentMapId = startMapId;
+
+      if (typeof me.posX === 'number' && typeof me.posY === 'number' && me.posX <= MAP_W && me.posY <= MAP_H) {
+        this.localPos.x = me.posX;
+        this.localPos.y = me.posY;
+      } else {
+        this.localPos.x = mapDef.spawnX;
+        this.localPos.y = mapDef.spawnY;
+      }
+
+      this.localPos.initialized = true;
+      this.lastSyncedPos = { x: Math.round(this.localPos.x), y: Math.round(this.localPos.y) };
+      this.walkTarget = null;
+      this.joyVec = { x: 0, y: 0 };
+      this.joyActive = false;
+      this.joyPointerId = null;
+    }
+
     this.village = village;
     this.players = players;
     if (settings) this.settings = settings;
@@ -920,7 +946,15 @@ class WorldMapController {
       posX: curX,
       posY: curY,
       location: this.currentMapId
-    }).catch(() => {});
+    }).then(() => {
+      this.positionSyncErrorShown = false;
+    }).catch(err => {
+      console.error(err);
+      if (err.code === 'permission-denied' && !this.positionSyncErrorShown) {
+        this.positionSyncErrorShown = true;
+        this.callbacks.onMovementSyncError?.();
+      }
+    });
   }
 
   getCameraOffset() {
