@@ -20,9 +20,8 @@ import { NPCS, SEASONAL_QUESTS, LEGENDARY_PROJECT, BULLETIN_QUEST_POOL } from '.
 import { auth } from './firebase-config.js';
 import {
   GoogleAuthProvider,
-  getRedirectResult,
   onAuthStateChanged,
-  signInWithRedirect,
+  signInWithPopup,
   signOut
 } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
 
@@ -92,7 +91,6 @@ const state = {
 };
 
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
-const GOOGLE_LOGIN_PENDING_KEY = 'farm_google_login_pending';
 
 function escapeHtml(str = '') {
   return String(str)
@@ -208,18 +206,12 @@ function getGoogleAuthErrorMessage(err) {
     'auth/unauthorized-domain': `網站網域「${host}」未加入 Firebase Authentication 的授權網域。`,
     'auth/operation-not-allowed': 'Firebase 尚未啟用 Google 登入 Provider。',
     'auth/network-request-failed': '網路連線失敗，請檢查網路後重試。',
-    'auth/redirect-cancelled-by-user': '登入流程已取消。'
+    'auth/redirect-cancelled-by-user': '登入流程已取消。',
+    'auth/popup-closed-by-user': 'Google 登入視窗已關閉，尚未完成登入。',
+    'auth/popup-blocked': '瀏覽器封鎖了 Google 登入視窗，請允許此網站開啟彈出式視窗後重試。'
   };
   const code = err?.code || 'auth/unknown';
   return `${messages[code] || 'Google 登入失敗，請檢查 Firebase Authentication 設定。'}（${code}）`;
-}
-
-function clearPendingGoogleLogin() {
-  try {
-    localStorage.removeItem(GOOGLE_LOGIN_PENDING_KEY);
-  } catch (err) {
-    console.error(err);
-  }
 }
 
 async function signOutGoogleAccount() {
@@ -3273,14 +3265,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-google-login').addEventListener('click', async () => {
     const button = document.getElementById('btn-google-login');
     button.disabled = true;
-    button.textContent = '正在前往 Google 登入…';
-    setAuthFeedback('正在開啟 Google 登入頁面…');
+    button.textContent = '正在開啟 Google 登入…';
+    setAuthFeedback('正在開啟 Google 登入視窗…');
     try {
-      localStorage.setItem(GOOGLE_LOGIN_PENDING_KEY, '1');
-      await signInWithRedirect(auth, new GoogleAuthProvider());
+      await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (err) {
       console.error(err);
-      clearPendingGoogleLogin();
       setAuthFeedback(getGoogleAuthErrorMessage(err), 'error');
       showToast(getGoogleAuthErrorMessage(err), 'error');
       button.disabled = false;
@@ -3325,36 +3315,6 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('')}
       </div>
     `);
-  });
-
-  let redirectWasPending = false;
-  try {
-    redirectWasPending = localStorage.getItem(GOOGLE_LOGIN_PENDING_KEY) === '1';
-  } catch (err) {
-    console.error(err);
-    setAuthFeedback(getGoogleAuthErrorMessage(err), 'error');
-  }
-  if (redirectWasPending) {
-    setAuthFeedback('已返回網站，正在確認 Google 登入結果…');
-  }
-  getRedirectResult(auth).then(async result => {
-    await auth.authStateReady();
-    const user = result?.user || auth.currentUser;
-    if (user) {
-      clearPendingGoogleLogin();
-      setAuthFeedback(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
-    } else if (redirectWasPending) {
-      clearPendingGoogleLogin();
-      const message = `Google 頁面已返回，但 Firebase 沒有收到登入帳號。請確認 Google Provider 已啟用，並將「${window.location.hostname}」加入 Firebase 的授權網域。`;
-      setAuthFeedback(message, 'error');
-      showToast(message, 'error');
-    }
-  }).catch(err => {
-    console.error(err);
-    clearPendingGoogleLogin();
-    const message = getGoogleAuthErrorMessage(err);
-    setAuthFeedback(message, 'error');
-    showToast(message, 'error');
   });
 
   onAuthStateChanged(auth, handleAuthStateChange, err => {
