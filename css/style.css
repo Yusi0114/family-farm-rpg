@@ -43,8 +43,8 @@ body {
 }
 
 @keyframes sleepBreathing {
-  0%, 100% { transform: rotate(90deg) scale(0.98); }
-  50% { transform: rotate(90deg) scale(1.03); }
+  0%, 100% { transform: rotate(270deg) scale(0.98); }
+  50% { transform: rotate(270deg) scale(1.03); }
 }
 
 @keyframes sleepBedBreathing {
@@ -76,7 +76,7 @@ body {
 }
 
 .sleeping-avatar {
-  transform: rotate(90deg);
+  transform: rotate(270deg);
   animation: sleepBreathing 2.4s ease-in-out infinite;
 }
 
