@@ -11,6 +11,8 @@ const MAP_W = 960;
 const MAP_H = 720;
 const PLAYER_RADIUS = 15;
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
+const REMOTE_MOVE_SPEED = 180;
+const REMOTE_ACTION_MAX_DELAY_MS = 5000;
 
 export function toDayTimelineMinutes(rawMins) {
   const mins = Number(rawMins);
@@ -350,6 +352,7 @@ class WorldMapController {
     this.localPos = { x: 480, y: 365, initialized: false };
     this.remotePositions = new Map();
     this.remoteLocations = new Map();
+    this.remoteActionAnimations = new Map();
     this.walkTarget = null;
     this.walkPhase = 0;
 
@@ -602,7 +605,6 @@ class WorldMapController {
     if (this.activeActionAnim) {
       const activeAction = this.activeActionAnim;
       this.activeActionAnim = null;
-      this.syncActionPresence(null);
       activeAction.resolve?.();
     }
     if (this.rafId) {
@@ -1069,7 +1071,6 @@ class WorldMapController {
 
       if (progress >= 1) {
         this.activeActionAnim = null;
-        this.syncActionPresence(null);
         action.resolve?.();
       }
     }
@@ -1264,8 +1265,17 @@ class WorldMapController {
         continue;
       }
       const cur = this.remotePositions.get(p.id) || { x: targetX, y: targetY };
-      cur.x += (targetX - cur.x) * Math.min(1, dt * 6);
-      cur.y += (targetY - cur.y) * Math.min(1, dt * 6);
+      const dx = targetX - cur.x;
+      const dy = targetY - cur.y;
+      const distance = Math.hypot(dx, dy);
+      const step = REMOTE_MOVE_SPEED * dt;
+      if (distance <= step) {
+        cur.x = targetX;
+        cur.y = targetY;
+      } else if (distance > 0) {
+        cur.x += (dx / distance) * step;
+        cur.y += (dy / distance) * step;
+      }
       this.remotePositions.set(p.id, cur);
     }
 
@@ -1604,7 +1614,24 @@ class WorldMapController {
 
   drawRemoteActionIndicator(ctx, player, x, y, now) {
     const action = player.actionAnimation;
-    if (!action || action.location !== this.currentMapId || action.expiresAt <= Date.now()) return;
+    if (!action || action.location !== this.currentMapId) return;
+
+    const actionId = `${action.startedAt}:${action.category}`;
+    let playback = this.remoteActionAnimations.get(player.id);
+    if (playback?.id !== actionId) {
+      const duration = Number(action.expiresAt) - Number(action.startedAt);
+      const delay = Date.now() - Number(action.startedAt);
+      if (
+        !Number.isFinite(duration) ||
+        duration <= 0 ||
+        !Number.isFinite(delay) ||
+        delay > REMOTE_ACTION_MAX_DELAY_MS
+      ) return;
+
+      playback = { id: actionId, expiresAt: now + duration };
+      this.remoteActionAnimations.set(player.id, playback);
+    }
+    if (playback.expiresAt <= now) return;
 
     const icons = {
       watering_can: '🪣',
@@ -1617,7 +1644,7 @@ class WorldMapController {
       harvest: '🌾'
     };
     const icon = icons[action.category] || '✨';
-    const remaining = action.expiresAt - Date.now();
+    const remaining = playback.expiresAt - now;
 
     ctx.save();
     ctx.globalAlpha = Math.min(1, remaining / 180);
