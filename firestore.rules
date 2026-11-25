@@ -26,11 +26,8 @@ service cloud.firestore {
       && (!changedKeys.hasAny(['readyToSleep']) || request.resource.data.readyToSleep == false)
       && (!changedKeys.hasAny(['location']) || request.resource.data.location == 'farm')
       && (!changedKeys.hasAny(['posX', 'posY']) || (
-        changedKeys.hasAll(['posX', 'posY'])
-        && (
-          (request.resource.data.posX == 210 && request.resource.data.posY == 215)
-          || (request.resource.data.posX == 265 && request.resource.data.posY == 225)
-        )
+        (request.resource.data.posX == 210 && request.resource.data.posY == 215)
+        || (request.resource.data.posX == 265 && request.resource.data.posY == 225)
       ));
     }
 
