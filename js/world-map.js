@@ -13,6 +13,7 @@ const PLAYER_RADIUS = 15;
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
 const REMOTE_MOVE_SPEED = 180;
 const REMOTE_ACTION_MAX_DELAY_MS = 5000;
+const REMOTE_ACTION_ARRIVAL_RADIUS = 8;
 
 export function toDayTimelineMinutes(rawMins) {
   const mins = Number(rawMins);
@@ -422,11 +423,15 @@ class WorldMapController {
       const toolTitle = `${tierInfo.name}${TOOL_CATEGORY_NAMES[category] || '工具'}`;
       const durationMs = Number.isFinite(opts.duration) && opts.duration > 0 ? opts.duration : 1150;
       const startedAt = Date.now();
+      const posX = Math.round(this.localPos.x);
+      const posY = Math.round(this.localPos.y);
       const actionAnimation = {
         category,
         location: this.currentMapId,
         startedAt,
-        expiresAt: startedAt + durationMs
+        expiresAt: startedAt + durationMs,
+        posX,
+        posY
       };
 
       this.walkTarget = null;
@@ -456,7 +461,19 @@ class WorldMapController {
 
   syncActionPresence(actionAnimation) {
     if (!this.roomId || !this.meId) return;
-    updatePlayerPresence(this.roomId, this.meId, { actionAnimation }).then(() => {
+    if (this.pendingSyncTimer) {
+      clearTimeout(this.pendingSyncTimer);
+      this.pendingSyncTimer = null;
+    }
+    this.lastSyncTime = performance.now();
+    this.lastSyncedPos = { x: actionAnimation.posX, y: actionAnimation.posY };
+    this.dirtySync = false;
+    updatePlayerPresence(this.roomId, this.meId, {
+      actionAnimation,
+      posX: actionAnimation.posX,
+      posY: actionAnimation.posY,
+      location: actionAnimation.location
+    }).then(() => {
       this.actionSyncErrorShown = false;
     }).catch(err => {
       console.error(err);
@@ -520,7 +537,7 @@ class WorldMapController {
       this.localPos.initialized = true;
     }
 
-    Object.keys(SUB_MAPS).forEach(id => getMapBgImage(id));
+    getMapBgImage(this.currentMapId);
 
     const showJoystick = this.settings.controlMode === 'dual' || this.settings.controlMode === 'joystick';
     const isRightJoy = this.settings.joystickSide === 'right';
@@ -1628,8 +1645,30 @@ class WorldMapController {
         delay > REMOTE_ACTION_MAX_DELAY_MS
       ) return;
 
-      playback = { id: actionId, expiresAt: now + duration };
+      const hasTargetPosition = Number.isFinite(action.posX) && Number.isFinite(action.posY);
+      const distance = hasTargetPosition
+        ? Math.hypot(action.posX - x, action.posY - y)
+        : 0;
+      playback = {
+        id: actionId,
+        targetX: hasTargetPosition ? action.posX : null,
+        targetY: hasTargetPosition ? action.posY : null,
+        arrivalDeadline: now + (distance / REMOTE_MOVE_SPEED) * 1000 + 1000,
+        duration,
+        expiresAt: null
+      };
       this.remoteActionAnimations.set(player.id, playback);
+    }
+
+    if (playback.expiresAt === null) {
+      if (playback.targetX !== null) {
+        const distance = Math.hypot(playback.targetX - x, playback.targetY - y);
+        if (distance > REMOTE_ACTION_ARRIVAL_RADIUS) {
+          if (now > playback.arrivalDeadline) playback.expiresAt = now;
+          return;
+        }
+      }
+      playback.expiresAt = now + playback.duration;
     }
     if (playback.expiresAt <= now) return;
 
