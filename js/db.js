@@ -126,7 +126,8 @@ export async function initOrGetRoom(roomId) {
 /**
  * 建立新角色（同時替全村公款 +300 啟動資金）
  */
-export async function createPlayer(roomId, playerInput) {
+export async function createPlayer(roomId, playerInput, ownerUid) {
+  if (!ownerUid) throw new Error('請先使用 Google 帳號登入');
   const roomRef = doc(db, 'rooms', roomId);
   const playerId = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
   const playerRef = doc(db, 'rooms', roomId, 'players', playerId);
@@ -154,6 +155,7 @@ export async function createPlayer(roomId, playerInput) {
 
   const newPlayer = {
     id: playerId,
+    ownerUid,
     name: playerInput.name.trim(),
     avatarConfig: playerInput.avatarConfig,
     mainClass: playerInput.mainClass,

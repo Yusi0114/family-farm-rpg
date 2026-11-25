@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if false;
+
+      match /players/{playerId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.ownerUid == request.auth.uid;
+        allow update: if signedIn() && (
+          (
+            resource.data.keys().hasAny(['ownerUid'])
+            &&
+            resource.data.ownerUid == request.auth.uid
+            && request.resource.data.ownerUid == resource.data.ownerUid
+          )
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'maxStamina',
+            'stamina',
+            'personalTime',
+            'isSleeping',
+            'isSick',
+            'scratchUsedToday',
+            'popularGiftUsedToday',
+            'dailyNpcChatUsed',
+            'dailyBuffs'
+          ])
+        );
+        allow delete: if signedIn()
+          && resource.data.ownerUid == request.auth.uid;
+      }
+    }
+  }
+}
