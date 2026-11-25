@@ -757,9 +757,9 @@ function renderGameScreen() {
   if (!village || !me) return;
 
   renderTopHud(village, me);
-  renderLocationBar(me);
   renderActivityTicker(village);
   updateNavBadges(village, me);
+  renderSleepScreen(me);
 
   if (state.activeTab === 'action') renderActionTab(village, me);
   else if (state.activeTab === 'bag') renderBagTab(village, me);
@@ -888,43 +888,6 @@ function renderTopHud(village, me) {
   document.getElementById('btn-game-sign-out').addEventListener('click', signOutGoogleAccount);
 }
 
-function renderLocationBar(me) {
-  const bar = document.getElementById('location-bar');
-  bar.innerHTML = Object.values(LOCATIONS).map(loc => {
-    const isHere = me.location === loc.id;
-    const herePlayers = state.players.filter(
-      p => p.location === loc.id && (Date.now() - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS)
-    );
-
-    return `
-      <button data-goto-loc="${loc.id}" class="shrink-0 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 border transition ${
-        isHere
-          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-          : 'bg-white text-stone-700 border-stone-200 active:bg-stone-100'
-      }">
-        <span>${loc.icon} ${loc.name.slice(0, 4)}</span>
-        ${herePlayers.length ? `
-          <span class="flex -space-x-1 ml-0.5">
-            ${herePlayers.map(p => renderAvatarSVG(p.avatarConfig, 18)).join('')}
-          </span>
-        ` : ''}
-      </button>
-    `;
-  }).join('');
-
-  bar.querySelectorAll('[data-goto-loc]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const targetLoc = btn.dataset.gotoLoc;
-      if (targetLoc !== me.location) {
-        await updatePlayerPresence(state.roomId, me.id, { location: targetLoc });
-      }
-      if (state.activeTab !== 'action') {
-        switchTab('action');
-      }
-    });
-  });
-}
-
 function renderActivityTicker(village) {
   const logs = village.activityLogs || [];
   const latest = logs[0]?.text || '歡迎來到小鎮！';
@@ -940,30 +903,22 @@ function updateNavBadges(village, me) {
   if (village.seasonalQuest && !village.seasonalQuest.completed) questDot.classList.remove('hidden');
   else questDot.classList.add('hidden');
 
-  const sleepLabel = document.getElementById('sleep-nav-label');
-  const isPassingOut = state.isPassOutInProgress;
-  const isWaiting = !isPassingOut && (me.readyToSleep || me.isSleeping);
-  const canSleepHere = worldMap.isAtSleepSpot();
-  sleepLabel.textContent = isPassingOut
-    ? '昏倒中'
-    : isWaiting
-    ? '暫時起床'
-    : canSleepHere
-      ? '上床睡覺'
-      : '回家睡覺';
-  const sleepButton = document.getElementById('btn-nav-sleep');
-  sleepButton.classList.toggle('bg-indigo-50', canSleepHere && !isWaiting && !isPassingOut);
-  sleepButton.classList.toggle('bg-amber-50', isWaiting);
-  sleepButton.querySelector('span')?.replaceChildren(
-    document.createTextNode(isPassingOut ? '💫' : isWaiting ? '☀️' : canSleepHere ? '😴' : '🏡')
+}
+
+function renderSleepScreen(me) {
+  const screen = document.getElementById('sleep-screen');
+  if (!screen) return;
+  const isSleeping = !state.isPassOutInProgress && Boolean(me.readyToSleep || me.isSleeping);
+  screen.classList.toggle('hidden', !isSleeping);
+  const errorEl = document.getElementById('sleep-screen-error');
+  errorEl?.classList.add('hidden');
+  if (!isSleeping) return;
+
+  document.getElementById('sleep-screen-avatar').innerHTML = renderAvatarSVG(
+    { ...me.avatarConfig, eyes: 'chill' },
+    104
   );
-  sleepButton.title = isPassingOut
-    ? '體力耗盡，家人正將你扛回農舍'
-    : isWaiting
-    ? '在農舍床鋪取消等待'
-    : canSleepHere
-      ? '在家族農舍上床睡覺'
-      : '回到農場家族農舍才能睡覺';
+  document.getElementById('sleep-screen-player-name').textContent = `${me.name} 正在床上休息`;
 }
 
 // ============================================================================
@@ -972,11 +927,8 @@ function updateNavBadges(village, me) {
 
 function renderActionTab(village, me) {
   const container = document.getElementById('main-content');
-  const locBar = document.getElementById('location-bar');
 
   // 三種移動模式共用 2D 地圖
-  if (locBar) locBar.classList.add('hidden');
-
   // 保留已掛載的 Canvas，避免資料更新時中斷角色移動
   if (document.getElementById('village-canvas')) {
     worldMap.updateData(village, state.players, state.settings, me);
@@ -990,75 +942,75 @@ function renderActionTab(village, me) {
     me,
     settings: state.settings,
     callbacks: {
-        getSelectedBait: () => state.selectedBait,
-        onBaitChange: (val) => { state.selectedBait = val; },
-        onMovementSyncError: () => showToast('角色位置同步遭拒；請確認 Firebase 已部署角色所有權規則。', 'error'),
-        onActionSyncError: () => showToast('角色動作同步失敗，請檢查網路連線。', 'error'),
-        onCancelSleep: () => cancelSleepWait(getMe()),
-        onInteract: (obj) => {
-          const curVillage = state.village;
-          const curMe = getMe();
-          if (!curVillage || !curMe) return;
+      getSelectedBait: () => state.selectedBait,
+      onBaitChange: (val) => { state.selectedBait = val; },
+      onMovementSyncError: () => showToast('角色位置同步遭拒；請確認 Firebase 已部署角色所有權規則。', 'error'),
+      onActionSyncError: () => showToast('角色動作同步失敗，請檢查網路連線。', 'error'),
+      onCancelSleep: () => cancelSleepWait(getMe()),
+      onInteract: (obj) => {
+        const curVillage = state.village;
+        const curMe = getMe();
+        if (!curVillage || !curMe) return;
 
-          if (obj.type === 'sleep') {
-            if (curMe.readyToSleep || curMe.isSleeping) cancelSleepWait(curMe);
-            else openSleepModal(curVillage, curMe);
-          } else if (obj.type === 'farm_plot') {
-            const plot = curVillage.farmPlots[obj.plotIndex];
-            if (plot.cleared && !plot.cropId) openSeedPickerModal(curVillage, curMe, obj.plotIndex, obj);
-            else {
-              const seed = Object.values(ITEMS).find(item => item.cropId === plot.cropId);
-              const isReady = plot.cropId && plot.daysGrown >= (seed?.growDays || 2);
-              const animation = !plot.cleared
-                ? { toolCategory: 'hoe', label: '開墾荒地', staminaCost: 15, isOutdoor: true }
-                : isReady
-                  ? { toolCategory: 'harvest', label: '採收作物', staminaCost: 6, isOutdoor: true }
-                  : { toolCategory: 'watering_can', label: '澆灌農田', staminaCost: 5, isOutdoor: true };
-              runAction(() => actionFarmPlot(state.roomId, curMe.id, obj.plotIndex), {
-                animation: { ...animation, x: obj.x, y: obj.y }
-              });
-            }
-          } else if (obj.type === 'adopt_animal') {
-            openAdoptAnimalModal(curVillage, curMe);
-          } else if (obj.type === 'ranch_animal') {
-            runAction(() => actionRanchCare(state.roomId, curMe.id, obj.animalId), {
-              animation: { toolCategory: 'brush', label: '照料動物', staminaCost: 8, x: obj.x, y: obj.y }
-            });
-          } else if (obj.type === 'kitchen') {
-            openKitchenModal(curVillage, curMe);
-          } else if (obj.type === 'smithy') {
-            openSmithyModal(curVillage, curMe);
-          } else if (obj.type === 'scratch') {
-            openScratchModal(curVillage, curMe);
-          } else if (obj.type === 'quests') {
-            openQuestBoardModal();
-          } else if (obj.type === 'rest_bench') {
-            openRestTimeModal();
-          } else if (obj.type === 'npc') {
-            openNpcModal(curVillage, curMe, obj.npcId);
-          } else if (obj.type === 'fish') {
-            runAction(() => actionFish(state.roomId, curMe.id, state.selectedBait || null, getEffectivePersonalTime(curMe)), {
-              animation: { toolCategory: 'fishing_rod', label: '港邊釣魚', staminaCost: 10, isOutdoor: true, x: obj.x, y: obj.y }
-            });
-          } else if (obj.type === 'mountain_act') {
-            const toolCategory = obj.actionId === 'mine_ore'
-              ? 'pickaxe'
-              : obj.actionId === 'chop_wood'
-                ? 'axe'
-                : obj.actionId === 'beach_combing' ? 'trowel' : 'harvest';
-            const actionConfig = [...LOCATION_ACTIONS.beach, ...LOCATION_ACTIONS.mountain]
-              .find(action => action.id === obj.actionId);
-            runAction(() => actionForageOrMine(state.roomId, curMe.id, obj.actionId, getEffectivePersonalTime(curMe)), {
-              animation: {
-                toolCategory,
-                label: obj.label,
-                staminaCost: actionConfig?.stamina || 10,
-                isOutdoor: true,
-                x: obj.x,
-                y: obj.y
-              }
+        if (obj.type === 'sleep') {
+          if (curMe.readyToSleep || curMe.isSleeping) cancelSleepWait(curMe);
+          else openSleepModal(curVillage, curMe);
+        } else if (obj.type === 'farm_plot') {
+          const plot = curVillage.farmPlots[obj.plotIndex];
+          if (plot.cleared && !plot.cropId) openSeedPickerModal(curVillage, curMe, obj.plotIndex, obj);
+          else {
+            const seed = Object.values(ITEMS).find(item => item.cropId === plot.cropId);
+            const isReady = plot.cropId && plot.daysGrown >= (seed?.growDays || 2);
+            const animation = !plot.cleared
+              ? { toolCategory: 'hoe', label: '開墾荒地', staminaCost: 15, isOutdoor: true }
+              : isReady
+                ? { toolCategory: 'harvest', label: '採收作物', staminaCost: 6, isOutdoor: true }
+                : { toolCategory: 'watering_can', label: '澆灌農田', staminaCost: 5, isOutdoor: true };
+            runAction(() => actionFarmPlot(state.roomId, curMe.id, obj.plotIndex), {
+              animation: { ...animation, x: obj.x, y: obj.y }
             });
           }
+        } else if (obj.type === 'adopt_animal') {
+          openAdoptAnimalModal(curVillage, curMe);
+        } else if (obj.type === 'ranch_animal') {
+          runAction(() => actionRanchCare(state.roomId, curMe.id, obj.animalId), {
+            animation: { toolCategory: 'brush', label: '照料動物', staminaCost: 8, x: obj.x, y: obj.y }
+          });
+        } else if (obj.type === 'kitchen') {
+          openKitchenModal(curVillage, curMe);
+        } else if (obj.type === 'smithy') {
+          openSmithyModal(curVillage, curMe);
+        } else if (obj.type === 'scratch') {
+          openScratchModal(curVillage, curMe);
+        } else if (obj.type === 'quests') {
+          openQuestBoardModal();
+        } else if (obj.type === 'rest_bench') {
+          openRestTimeModal();
+        } else if (obj.type === 'npc') {
+          openNpcModal(curVillage, curMe, obj.npcId);
+        } else if (obj.type === 'fish') {
+          runAction(() => actionFish(state.roomId, curMe.id, state.selectedBait || null, getEffectivePersonalTime(curMe)), {
+            animation: { toolCategory: 'fishing_rod', label: '港邊釣魚', staminaCost: 10, isOutdoor: true, x: obj.x, y: obj.y }
+          });
+        } else if (obj.type === 'mountain_act') {
+          const toolCategory = obj.actionId === 'mine_ore'
+            ? 'pickaxe'
+            : obj.actionId === 'chop_wood'
+              ? 'axe'
+              : obj.actionId === 'beach_combing' ? 'trowel' : 'harvest';
+          const actionConfig = [...LOCATION_ACTIONS.beach, ...LOCATION_ACTIONS.mountain]
+            .find(action => action.id === obj.actionId);
+          runAction(() => actionForageOrMine(state.roomId, curMe.id, obj.actionId, getEffectivePersonalTime(curMe)), {
+            animation: {
+              toolCategory,
+              label: obj.label,
+              staminaCost: actionConfig?.stamina || 10,
+              isOutdoor: true,
+              x: obj.x,
+              y: obj.y
+            }
+          });
+        }
       }
     }
   });
@@ -2579,10 +2531,6 @@ function showSleepLocationError() {
 async function cancelSleepWait(me) {
   if (state.isPassOutInProgress) return;
   if (!me || (!me.readyToSleep && !me.isSleeping)) return;
-  if (!worldMap.isAtSleepSpot()) {
-    showToast('請回到農場家族農舍床鋪旁，才能取消等待。', 'info');
-    return;
-  }
 
   const frozenTime = getEffectivePersonalTime(me);
   try {
@@ -2600,7 +2548,13 @@ async function cancelSleepWait(me) {
     renderGameScreen();
   } catch (err) {
     console.error(err);
-    showToast(err.message || '取消睡覺等待失敗，請檢查網路連線。', 'error');
+    const message = err.message || '取消睡覺等待失敗，請檢查網路連線。';
+    const errorEl = document.getElementById('sleep-screen-error');
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.classList.remove('hidden');
+    }
+    showToast(message, 'error');
   }
 }
 
@@ -2621,6 +2575,7 @@ async function sleepAtHome(me, forceAFK = false) {
   me.effectiveTime = personalTime;
   const sleepPosition = worldMap.prepareForSleep();
   worldMap.setLocalSleepWaiting(true);
+  renderGameScreen();
   try {
     await updatePlayerPresence(state.roomId, me.id, {
       ...sleepPosition,
@@ -2997,7 +2952,6 @@ function switchTab(tabName) {
 
   if (tabName !== 'action') {
     worldMap.unmount();
-    document.getElementById('location-bar')?.classList.remove('hidden');
   }
   state.activeTab = tabName;
   document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -3454,17 +3408,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 
-  document.getElementById('btn-nav-sleep').addEventListener('click', () => {
-    const me = getMe();
-    if (!state.village || !me) return;
-    if (state.isPassOutInProgress) return;
-    if (me.readyToSleep || me.isSleeping) {
-      cancelSleepWait(me);
-    } else if (!worldMap.isAtSleepSpot()) {
-      showSleepLocationError();
-    } else {
-      openSleepModal(state.village, me);
-    }
+  document.getElementById('btn-wake-from-sleep').addEventListener('click', () => {
+    cancelSleepWait(getMe());
   });
 
   document.getElementById('activity-ticker').addEventListener('click', () => {

@@ -14,7 +14,7 @@ body {
   overscroll-behavior-y: none;
 }
 
-/* 隱藏水平捲動條（用於地點切換列與倉庫分類標籤） */
+/* 隱藏水平捲動條（用於地圖區域分布列與倉庫分類標籤） */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -42,6 +42,22 @@ body {
   50% { transform: scale(1.06); }
 }
 
+@keyframes sleepBreathing {
+  0%, 100% { transform: rotate(90deg) scale(0.98); }
+  50% { transform: rotate(90deg) scale(1.03); }
+}
+
+@keyframes sleepBedBreathing {
+  0%, 100% { transform: scale(0.995); }
+  50% { transform: scale(1.005); }
+}
+
+@keyframes sleepZzz {
+  0% { opacity: 0; transform: translateY(10px) scale(0.8); }
+  25% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-30px) scale(1.08); }
+}
+
 .animate-dice-spin {
   animation: diceRollSpin 0.16s infinite linear;
 }
@@ -52,6 +68,24 @@ body {
 
 .animate-crit-pulse {
   animation: critPulse 1.2s infinite ease-in-out;
+}
+
+.sleep-bed {
+  background: linear-gradient(135deg, #a16207, #713f12);
+  animation: sleepBedBreathing 2.4s ease-in-out infinite;
+}
+
+.sleeping-avatar {
+  transform: rotate(90deg);
+  animation: sleepBreathing 2.4s ease-in-out infinite;
+}
+
+.sleep-zzz {
+  animation: sleepZzz 2.6s ease-out infinite;
+}
+
+.sleep-zzz-delay {
+  animation-delay: 1.3s;
 }
 
 /* 刮刮樂銀漆質感 */

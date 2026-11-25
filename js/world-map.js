@@ -1464,34 +1464,6 @@ class WorldMapController {
       }
     }
 
-    const sleepNavLabel = document.getElementById('sleep-nav-label');
-    const sleepNavButton = document.getElementById('btn-nav-sleep');
-    if (sleepNavLabel && sleepNavButton) {
-      const passingOut = Boolean(this.passOutAnimation);
-      const waiting = !passingOut && this.isLocalSleepLocked();
-      const label = passingOut
-        ? '昏倒中'
-        : waiting
-        ? '暫時起床'
-        : this.isAtSleepSpot()
-          ? '上床睡覺'
-          : '回家睡覺';
-      const icon = passingOut ? '💫' : waiting ? '☀️' : this.isAtSleepSpot() ? '😴' : '🏡';
-      const iconSpan = sleepNavButton.querySelector('span');
-      if (sleepNavLabel.textContent !== label) sleepNavLabel.textContent = label;
-      if (iconSpan && iconSpan.textContent !== icon) iconSpan.textContent = icon;
-      sleepNavButton.classList.toggle('bg-indigo-50', !passingOut && !waiting && this.isAtSleepSpot());
-      sleepNavButton.classList.toggle('bg-amber-50', waiting);
-      const title = passingOut
-        ? '體力耗盡，家人正將你扛回農舍'
-        : waiting
-        ? '在農舍床鋪取消等待'
-        : this.isAtSleepSpot()
-          ? '在家族農舍上床睡覺'
-          : '回到農場家族農舍才能睡覺';
-      if (sleepNavButton.title !== title) sleepNavButton.title = title;
-    }
-
     const baitBar = document.getElementById('map-bait-bar');
     if (baitBar) {
       baitBar.classList.toggle('hidden', this.currentMapId !== 'beach');

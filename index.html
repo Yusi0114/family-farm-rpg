@@ -110,17 +110,12 @@
         <!-- 由 ui.js 動態渲染 -->
       </header>
 
-      <!-- 【方案 A】地點快速切換列（顯示家人頭像駐點） -->
-      <nav id="location-bar" class="bg-stone-100/90 border-b border-stone-200 px-2 py-1.5 flex gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-        <!-- 由 ui.js 動態渲染 -->
-      </nav>
-
       <!-- 【區塊 2 & 3】中段主互動與行動區（隨底部導航分頁切換） -->
       <main id="main-content" class="flex-1 overflow-y-auto p-3 space-y-3">
         <!-- 由 ui.js 動態渲染 -->
       </main>
 
-      <!-- 【區塊 4】底部即時動態框 ＋ 5 顆固定導航列 -->
+      <!-- 【區塊 4】底部即時動態框 ＋ 4 顆固定導航列 -->
       <footer class="bg-white border-t border-stone-200 shrink-0 z-10 pb-safe">
         <!-- 即時動態跑馬燈（點擊可展開歷史） -->
         <div id="activity-ticker" class="bg-stone-800 text-stone-100 px-3 py-1.5 text-xs cursor-pointer active:bg-stone-700 transition">
@@ -130,8 +125,8 @@
           </div>
         </div>
 
-        <!-- 5 顆固定導航按鈕 -->
-        <div id="bottom-nav" class="grid grid-cols-5 gap-1 px-1.5 py-1.5 bg-white">
+        <!-- 4 顆固定導航按鈕 -->
+        <div id="bottom-nav" class="grid grid-cols-4 gap-1 px-1.5 py-1.5 bg-white">
           <button data-tab="action" class="nav-btn flex flex-col items-center justify-center py-1 rounded-xl text-emerald-700 bg-emerald-50 font-bold">
             <span class="text-lg leading-none">🌾</span>
             <span class="text-[11px] mt-1">行動</span>
@@ -149,10 +144,6 @@
             <span class="text-lg leading-none">🧙</span>
             <span class="text-[11px] mt-1">角色</span>
             <span id="stat-badge-dot" class="hidden absolute top-1 right-4 w-2 h-2 rounded-full bg-amber-500"></span>
-          </button>
-          <button id="btn-nav-sleep" class="flex flex-col items-center justify-center py-1 rounded-xl text-indigo-600 active:bg-indigo-50">
-            <span class="text-lg leading-none">🛏️</span>
-            <span id="sleep-nav-label" class="text-[11px] mt-1 font-bold">睡覺</span>
           </button>
         </div>
       </footer>
@@ -280,6 +271,37 @@
         <div id="generic-modal-body" class="flex-1 overflow-y-auto p-4 space-y-3">
           <!-- 動態內容 -->
         </div>
+      </div>
+    </div>
+
+    <!-- ==================== 全畫面：多人等待就寢 ==================== -->
+    <div id="sleep-screen" class="hidden fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex flex-col items-center justify-center p-4 pb-safe" role="dialog" aria-modal="true" aria-labelledby="sleep-screen-title">
+      <div class="w-full max-w-lg text-center">
+        <div class="mb-5">
+          <div id="sleep-screen-title" class="text-2xl font-black tracking-wide text-amber-100 drop-shadow-lg">🌙 夜深了，晚安</div>
+          <p id="sleep-screen-caption" class="mt-2 text-sm font-bold text-stone-200">你已上床休息，等待家人就寢…</p>
+        </div>
+
+        <div class="sleep-bed mx-auto relative w-full max-w-md h-60 rounded-[2rem] border-[10px] border-amber-950 shadow-2xl">
+          <div class="absolute inset-2 rounded-[1.4rem] bg-amber-50 shadow-inner"></div>
+          <div class="absolute left-5 top-1/2 -translate-y-1/2 w-28 h-36 rounded-[1.2rem] border border-amber-200 bg-white shadow-md flex items-center justify-center">
+            <div class="sleeping-avatar" id="sleep-screen-avatar"></div>
+          </div>
+          <div class="absolute left-28 right-4 top-4 bottom-4 rounded-[1.2rem] border-2 border-amber-700/50 bg-gradient-to-br from-amber-400 via-amber-600 to-amber-800 shadow-lg overflow-hidden">
+            <div class="absolute left-2 right-2 top-2 h-5 rounded-full bg-amber-200/50"></div>
+            <div class="absolute inset-x-4 top-1/2 h-px bg-amber-100/30"></div>
+            <div class="absolute inset-x-4 bottom-5 h-px bg-amber-950/20"></div>
+          </div>
+          <div class="sleep-zzz absolute -top-8 right-16 text-amber-100 text-2xl font-black drop-shadow">Zzz</div>
+          <div class="sleep-zzz sleep-zzz-delay absolute -top-2 right-6 text-amber-200 text-lg font-black drop-shadow">Zzz</div>
+        </div>
+
+        <div id="sleep-screen-player-name" class="mt-5 text-lg font-black text-amber-50"></div>
+        <button id="btn-wake-from-sleep" class="mt-6 w-full max-w-xs rounded-2xl border-2 border-amber-200 bg-amber-100 px-6 py-3.5 text-base font-black text-amber-950 shadow-xl active:scale-95">
+          ☀️ 起床（取消等待）
+        </button>
+        <p id="sleep-screen-error" class="hidden mt-3 text-sm font-bold text-red-200" role="status"></p>
+        <p class="mt-3 text-xs font-medium text-stone-300">按下起床後會取消等待，今天的時間不會倒退。</p>
       </div>
     </div>
 
