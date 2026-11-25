@@ -6,6 +6,7 @@ import { NPCS } from '../data/npcs-quests.js';
 import { renderAvatarSVG, renderNpcAvatarSVG, renderChibiPlayerSVG, renderChibiNpcSVG } from './avatar-svg.js';
 import { updatePlayerPresence } from './db.js';
 import { soundFX } from './sound-fx.js';
+import { BED_SLOTS, getPlayerBedSlot } from '../data/world-layout.js';
 
 const MAP_W = 960;
 const MAP_H = 720;
@@ -14,8 +15,6 @@ const ONLINE_TIMEOUT_MS = 10 * 60 * 1000;
 const REMOTE_MOVE_SPEED = 180;
 const REMOTE_ACTION_MAX_DELAY_MS = 5000;
 const REMOTE_ACTION_ARRIVAL_RADIUS = 8;
-const FARM_BED_POSITION = { x: 210, y: 215 };
-
 export function toDayTimelineMinutes(rawMins) {
   const mins = Number(rawMins);
   if (!Number.isFinite(mins)) return 360;
@@ -229,6 +228,29 @@ export const SUB_MAPS = {
     ]
   },
 
+  house_interior: {
+    id: 'house_interior',
+    name: '家族農舍',
+    icon: '🏡',
+    outerColor: '#8b6842',
+    spawnX: 480,
+    spawnY: 605,
+    exits: [
+      { id: 'to_farm', x: 420, y: 655, w: 120, h: 65, arrow: '⬇️', label: '回農場農田', targetMap: 'farm', spawnX: 265, spawnY: 235 }
+    ],
+    houses: [],
+    wallBoxes: [
+      { x: 0, y: 0, w: 960, h: 175 },
+      { x: 0, y: 0, w: 125, h: 720 },
+      { x: 835, y: 0, w: 125, h: 720 },
+      { x: 0, y: 655, w: 415, h: 65 },
+      { x: 545, y: 655, w: 415, h: 65 },
+      ...BED_SLOTS.map(bed => ({ x: bed.x - 42, y: bed.y - 28, w: 84, h: 56 })),
+      { x: 435, y: 350, w: 90, h: 85 },
+      { x: 675, y: 125, w: 85, h: 85 }
+    ]
+  },
+
   ranch: {
     id: 'ranch',
     name: '牧場畜舍',
@@ -291,7 +313,8 @@ export const SUB_MAPS = {
     spawnX: 435,
     spawnY: 130,
     exits: [
-      { id: 'to_town', x: 370, y: 0, w: 125, h: 60, arrow: '⬆️', label: '回村莊廣場', targetMap: 'town', spawnX: 495, spawnY: 620 }
+      { id: 'to_town', x: 370, y: 0, w: 125, h: 60, arrow: '⬆️', label: '回村莊廣場', targetMap: 'town', spawnX: 495, spawnY: 620 },
+      { id: 'to_coral_island', x: 55, y: 555, w: 150, h: 100, arrow: '⛵', label: '搭船前往珊瑚礁離島', targetMap: 'coral_island', spawnX: 230, spawnY: 540, requiredProject: 'fishing_boat' }
     ],
     houses: [
       { id: 'house_hai', name: '⚓ 海伯船長屋', x: 95, y: 75, w: 270, h: 190 }
@@ -304,6 +327,27 @@ export const SUB_MAPS = {
       { x: 645, y: 0, w: 315, h: 315 },
       { x: 620, y: 445, w: 340, h: 275 },
       { x: 865, y: 315, w: 95, h: 130 }
+    ]
+  },
+
+  coral_island: {
+    id: 'coral_island',
+    name: '珊瑚礁離島',
+    icon: '🏝️',
+    outerColor: '#67b7a3',
+    spawnX: 230,
+    spawnY: 540,
+    exits: [
+      { id: 'to_beach', x: 55, y: 555, w: 150, h: 100, arrow: '⛵', label: '搭船返回漁港', targetMap: 'beach', spawnX: 185, spawnY: 565 }
+    ],
+    houses: [],
+    wallBoxes: [
+      { x: 0, y: 0, w: 960, h: 60 },
+      { x: 0, y: 0, w: 55, h: 720 },
+      { x: 905, y: 0, w: 55, h: 720 },
+      { x: 0, y: 675, w: 960, h: 45 },
+      { x: 0, y: 500, w: 110, h: 175 },
+      { x: 350, y: 190, w: 260, h: 90 }
     ]
   },
 
@@ -393,6 +437,7 @@ class WorldMapController {
     this.nearestInteractable = null;
     this.interactables = [];
     this.colliders = [];
+    this.lastLockedExitAt = 0;
   }
 
   /**
@@ -548,7 +593,7 @@ class WorldMapController {
         <canvas id="village-canvas" class="w-full h-full block"></canvas>
 
         <!-- 頂部目前區域與在線家人分布列 -->
-        <div id="map-region-pills" aria-label="目前區域與在線家人分布" class="absolute top-2 left-2 right-2 flex gap-1 overflow-x-auto no-scrollbar pointer-events-auto"></div>
+        <div id="map-region-pills" aria-label="目前區域與在線家人分布" class="absolute top-2 left-2 right-2 flex gap-1 overflow-x-auto no-scrollbar pointer-events-none"></div>
 
         <!-- 漁港專屬：魚餌快速切換條 -->
         <div id="map-bait-bar" class="hidden absolute top-11 left-2 bg-sky-950/85 text-white px-2.5 py-1.5 rounded-2xl text-[11px] flex items-center gap-1.5 backdrop-blur-xs border border-sky-400/40">
@@ -617,9 +662,10 @@ class WorldMapController {
     if (settings) this.settings = settings;
     const localPlayer = this.players.find(player => player.id === this.meId);
     if (!this.passOutAnimation && (localPlayer?.readyToSleep || localPlayer?.isSleeping)) {
-      this.currentMapId = 'farm';
-      this.localPos.x = FARM_BED_POSITION.x;
-      this.localPos.y = FARM_BED_POSITION.y;
+      const bed = getPlayerBedSlot(this.players, this.meId);
+      this.currentMapId = 'house_interior';
+      this.localPos.x = bed.x;
+      this.localPos.y = bed.y;
       this.walkTarget = null;
       this.joyActive = false;
       this.joyVec = { x: 0, y: 0 };
@@ -687,8 +733,10 @@ class WorldMapController {
   }
 
   isAtSleepSpot() {
-    return this.currentMapId === 'farm' &&
-      Math.hypot(this.localPos.x - FARM_BED_POSITION.x, this.localPos.y - FARM_BED_POSITION.y) <= 64;
+    if (this.currentMapId !== 'house_interior') return false;
+    return Math.hypot(this.localPos.x - 245, this.localPos.y - 390) <= 130 ||
+      Math.hypot(this.localPos.x - 720, this.localPos.y - 435) <= 120 ||
+      BED_SLOTS.some(bed => Math.hypot(this.localPos.x - bed.x, this.localPos.y - bed.y) <= 64);
   }
 
   isLocalSleepLocked() {
@@ -719,22 +767,23 @@ class WorldMapController {
     const animation = this.passOutAnimation;
     this.passOutAnimation = null;
     const me = this.players.find(player => player.id === this.meId);
+    const bed = getPlayerBedSlot(this.players, this.meId);
     const isSleeping = Boolean(me?.readyToSleep || me?.isSleeping);
-    const x = isSleeping ? FARM_BED_POSITION.x : 265;
-    const y = isSleeping ? FARM_BED_POSITION.y : 225;
-    this.currentMapId = 'farm';
+    const x = isSleeping ? bed.x : bed.wakeX;
+    const y = isSleeping ? bed.y : bed.wakeY;
+    this.currentMapId = 'house_interior';
     this.localPos.x = x;
     this.localPos.y = y;
     this.walkTarget = null;
     this.dustParticles = [];
     this.footprints = [];
     if (me) {
-      me.location = 'farm';
+      me.location = 'house_interior';
       me.posX = x;
       me.posY = y;
     }
     this.mapFadeAlpha = 0.85;
-    this.mapBannerText = '🌾 農場農田';
+    this.mapBannerText = '🏡 家族農舍';
     this.mapBannerTimer = 2.2;
     this.renderRegionPills();
     this.rebuildMapEntities();
@@ -748,15 +797,16 @@ class WorldMapController {
   }
 
   prepareForSleep() {
-    this.currentMapId = 'farm';
-    this.localPos.x = FARM_BED_POSITION.x;
-    this.localPos.y = FARM_BED_POSITION.y;
+    const bed = getPlayerBedSlot(this.players, this.meId);
+    this.currentMapId = 'house_interior';
+    this.localPos.x = bed.x;
+    this.localPos.y = bed.y;
     this.walkTarget = null;
     this.joyActive = false;
     this.joyPointerId = null;
     this.joyVec = { x: 0, y: 0 };
     this.rebuildMapEntities();
-    return { location: 'farm', posX: FARM_BED_POSITION.x, posY: FARM_BED_POSITION.y };
+    return { location: 'house_interior', posX: bed.x, posY: bed.y };
   }
 
   setLocalSleepWaiting(ready) {
@@ -765,9 +815,10 @@ class WorldMapController {
       me.readyToSleep = ready;
       me.isSleeping = ready;
       if (ready) {
-        me.location = 'farm';
-        me.posX = FARM_BED_POSITION.x;
-        me.posY = FARM_BED_POSITION.y;
+        const bed = getPlayerBedSlot(this.players, this.meId);
+        me.location = 'house_interior';
+        me.posX = bed.x;
+        me.posY = bed.y;
       }
     }
   }
@@ -817,22 +868,13 @@ class WorldMapController {
 
     if (this.currentMapId === 'farm') {
       items.push({
-        id: 'family_bed',
-        type: 'sleep',
-        x: FARM_BED_POSITION.x,
-        y: FARM_BED_POSITION.y,
-        radius: 64,
-        icon: '🛏️',
-        label: '😴 上床睡覺'
-      });
-      items.push({
         id: 'farm_house_door',
-        type: 'quests',
+        type: 'house_enter',
         x: 265,
         y: 225,
         radius: 52,
         icon: '🏡',
-        label: '農舍布告與村莊委託'
+        label: '進入家族農舍'
       });
       items.push({
         id: 'farm_rest',
@@ -906,6 +948,8 @@ class WorldMapController {
       items.push(
         { id: 'town_kitchen', type: 'kitchen', x: 205, y: 280, radius: 54, icon: '🍲', label: '陳阿嬤大廚房' },
         { id: 'town_board', type: 'quests', x: 565, y: 245, radius: 54, icon: '📜', label: '村長委託布告欄' },
+        { id: 'town_projects', type: 'village_projects', x: 655, y: 335, radius: 52, icon: '🏗️', label: '小鎮建設募資' },
+        { id: 'town_encyclopedia', type: 'encyclopedia', x: 395, y: 330, radius: 52, icon: '📖', label: '山海博物誌' },
         { id: 'town_smithy', type: 'smithy', x: 675, y: 545, radius: 56, icon: '⚒️', label: '大宇打鐵鋪' },
         { id: 'town_scratch', type: 'scratch', x: 435, y: 465, radius: 54, icon: '🎟️', label: '過年刮刮樂攤' },
         {id: 'town_rest',type: 'rest_bench',x: 615,y: 455,radius: 52,icon: '🪑',label: '廣場長椅歇息'},
@@ -952,6 +996,46 @@ class WorldMapController {
         { id: 'sea_fish', type: 'fish', x: 800, y: 385, radius: 64, icon: '🎣', label: '碼頭盡頭釣魚' },
         { id: 'sea_comb', type: 'mountain_act', actionId: 'beach_combing', x: 475, y: 530, radius: 64, icon: '🦀', label: '潮間帶趕海' }
       );
+      for (const bottle of this.village.driftBottles || []) {
+        if (bottle.mapId === this.currentMapId) {
+          items.push({ id: `drift_${bottle.id}`, type: 'drift_bottle', bottleId: bottle.id, x: bottle.x, y: bottle.y, radius: 42, icon: '🍾', label: '✨ 神秘漂流瓶' });
+        }
+      }
+    } else if (this.currentMapId === 'house_interior') {
+      items.push(
+        ...BED_SLOTS.map((bed, index) => ({
+          id: `bed_${index}`,
+          type: 'sleep',
+          x: bed.x,
+          y: bed.y,
+          radius: 64,
+          icon: '🛏️',
+          label: '😴 上床睡覺'
+        })),
+        { id: 'left_beds', type: 'sleep', x: 245, y: 390, radius: 130, icon: '🛏️', label: '😴 上床睡覺' },
+        { id: 'right_beds', type: 'sleep', x: 720, y: 435, radius: 120, icon: '🛏️', label: '😴 上床睡覺' },
+        {
+          id: 'family_table',
+          type: 'dining_table',
+          x: 480,
+          y: 395,
+          radius: 68,
+          icon: this.village.diningTable ? (ITEMS[this.village.diningTable.itemId]?.icon || '🍲') : '🍲',
+          label: this.village.diningTable ? '🍽️ 圍爐享用' : '🍽️ 擺上料理'
+        },
+        { id: 'family_wardrobe', type: 'wardrobe', x: 715, y: 215, radius: 55, icon: '👘', label: '打開衣櫃換裝' }
+      );
+    } else if (this.currentMapId === 'coral_island') {
+      items.push(
+        { id: 'island_fishing', type: 'island_fishing', x: 180, y: 360, radius: 64, icon: '🎣', label: '珊瑚礁深水釣點' },
+        { id: 'island_tidepool', type: 'island_tidepool', x: 760, y: 410, radius: 64, icon: '🐚', label: '東岸礁岩潮間帶' },
+        { id: 'island_ruins', type: 'island_treasure', x: 480, y: 245, radius: 72, icon: '🗿', label: '中央古代石陣尋寶' }
+      );
+      for (const bottle of this.village.driftBottles || []) {
+        if (bottle.mapId === this.currentMapId) {
+          items.push({ id: `drift_${bottle.id}`, type: 'drift_bottle', bottleId: bottle.id, x: bottle.x, y: bottle.y, radius: 42, icon: '🍾', label: '✨ 神秘漂流瓶' });
+        }
+      }
     } else if (this.currentMapId === 'mountain') {
       items.push(
         { id: 'mt_mine', type: 'mountain_act', actionId: 'mine_ore', x: 675, y: 295, radius: 64, icon: '⛏️', label: '古礦坑挖礦' },
@@ -1258,8 +1342,9 @@ class WorldMapController {
 
     const sleepLocked = this.isLocalSleepLocked();
     if (sleepLocked) {
-      this.localPos.x = FARM_BED_POSITION.x;
-      this.localPos.y = FARM_BED_POSITION.y;
+      const bed = getPlayerBedSlot(this.players, this.meId);
+      this.localPos.x = bed.x;
+      this.localPos.y = bed.y;
       this.walkTarget = null;
       this.joyActive = false;
       this.joyPointerId = null;
@@ -1364,6 +1449,16 @@ class WorldMapController {
           this.localPos.y >= ex.y &&
           this.localPos.y <= ex.y + ex.h
         ) {
+          if (ex.requiredProject && !this.village?.villageProjects?.[ex.requiredProject]?.completed) {
+            this.localPos.x = prevX;
+            this.localPos.y = prevY;
+            this.walkTarget = null;
+            if (Date.now() - this.lastLockedExitAt > 1500) {
+              this.lastLockedExitAt = Date.now();
+              this.callbacks.onLockedExit?.(ex);
+            }
+            return;
+          }
           this.switchToMap(ex.targetMap, ex.spawnX, ex.spawnY);
           return;
         }
@@ -1559,15 +1654,12 @@ class WorldMapController {
     }
     renderChars.sort((a, b) => a.y - b.y);
 
-    let sleepingIndex = 0;
     for (const item of renderChars) {
       if (item.passOut) {
         this.drawPassOutCharacter(ctx, item.player, item.x, item.y, item.passOut);
       } else if (item.player.readyToSleep || item.player.isSleeping) {
-        const bedX = 140 + (sleepingIndex % 5) * 145;
-        const bedY = 220 + Math.floor(sleepingIndex / 5) * 68;
-        this.drawSleepingPlayer(ctx, item.player, bedX, bedY, now);
-        sleepingIndex++;
+        const bed = getPlayerBedSlot(this.players, item.player.id);
+        this.drawSleepingPlayer(ctx, item.player, bed.x, bed.y, now);
       } else {
         this.drawPlayerCharacter(ctx, item.player, item.x, item.y, item.isMe, item.isMoving);
       }
@@ -2360,6 +2452,9 @@ class WorldMapController {
             const bob = Math.sin(now * 0.006 + obj.x) * 2.5;
             this.drawStatusBubble(ctx, obj.x, obj.y - 32 + bob, '✨', '#fef08a', '#ca8a04');
           }
+        } else if (obj.type === 'drift_bottle') {
+          const bob = Math.sin(now * 0.005 + obj.x) * 3;
+          this.drawStatusBubble(ctx, obj.x, obj.y - 30 + bob, '✨', '#fef08a', '#ca8a04');
         }
       }
     }

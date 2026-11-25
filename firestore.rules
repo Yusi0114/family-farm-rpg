@@ -6,6 +6,27 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAllowedSleepPosition() {
+      let x = request.resource.data.posX;
+      let y = request.resource.data.posY;
+      return (x == 205 && y == 230)
+        || (x == 205 && y == 340)
+        || (x == 205 && y == 450)
+        || (x == 205 && y == 555)
+        || (x == 760 && y == 325)
+        || (x == 760 && y == 435)
+        || (x == 760 && y == 545)
+        || (x == 275 && y == 230)
+        || (x == 275 && y == 340)
+        || (x == 275 && y == 450)
+        || (x == 275 && y == 555)
+        || (x == 690 && y == 325)
+        || (x == 690 && y == 435)
+        || (x == 690 && y == 545)
+        || (x == 210 && y == 215)
+        || (x == 265 && y == 225);
+    }
+
     function canUpdateSharedPlayerState() {
       let changedKeys = request.resource.data.diff(resource.data).affectedKeys();
       return changedKeys.hasOnly([
@@ -24,10 +45,9 @@ service cloud.firestore {
         'posY'
       ])
       && (!changedKeys.hasAny(['readyToSleep']) || request.resource.data.readyToSleep == false)
-      && (!changedKeys.hasAny(['location']) || request.resource.data.location == 'farm')
+      && (!changedKeys.hasAny(['location']) || request.resource.data.location in ['farm', 'house_interior'])
       && (!changedKeys.hasAny(['posX', 'posY']) || (
-        (request.resource.data.posX == 210 && request.resource.data.posY == 215)
-        || (request.resource.data.posX == 265 && request.resource.data.posY == 225)
+        isAllowedSleepPosition()
       ));
     }
 

@@ -64,6 +64,13 @@ export function calculateCheckModifiers(player, villageState, actionConfig) {
     } else if (buff.type === 'fishing_bonus' && actionConfig.skill === 'fishing') {
       totalMod += buff.value;
       breakdown.push({ label: '小管麵線精力', value: buff.value });
+    } else if (
+      buff.type === 'family_meal' &&
+      Number.isFinite(buff.expiresAt) &&
+      (player.personalTime || 360) < buff.expiresAt
+    ) {
+      totalMod += 1;
+      breakdown.push({ label: '家人圍爐', value: 1 });
     }
   }
 
@@ -71,6 +78,12 @@ export function calculateCheckModifiers(player, villageState, actionConfig) {
   if (villageState?.legendaryCompleted) {
     totalMod += 1;
     breakdown.push({ label: '豐年祭慶典', value: 1 });
+  }
+
+  const villageCheckBonus = villageState?.villageBonuses?.check || 0;
+  if (villageCheckBonus) {
+    totalMod += villageCheckBonus;
+    breakdown.push({ label: '山海博物誌收藏獎勵', value: villageCheckBonus });
   }
 
   // 7. 負面狀態：工作狂透支疲勞 (-3)

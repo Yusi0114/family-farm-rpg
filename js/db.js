@@ -17,6 +17,7 @@ import { ITEMS } from '../data/items-recipes.js';
 import { buildStarterToolsState } from './tool-utils.js';
 import { WEATHER_TYPES, ANIMAL_TYPES } from '../data/skills-actions.js';
 import { SEASONAL_QUESTS, LEGENDARY_PROJECT, BULLETIN_QUEST_POOL } from '../data/npcs-quests.js';
+import { getPlayerBedSlot } from '../data/world-layout.js';
 
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分鐘內有操作視為「在線」
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -84,6 +85,16 @@ export async function initOrGetRoom(roomId) {
     sharedMoney: 400, // 基礎 400，每位村民加入再 +300
     villageLevel: 1,
     villageXp: 0,
+    villageProjects: {
+      sprinkler: { progress: 0, target: 1500, completed: false },
+      feeder: { progress: 0, target: 2000, completed: false },
+      fishing_boat: { progress: 0, target: 3000, completed: false }
+    },
+    encyclopedia: { fish: {}, crops: {}, forage: {}, cooking: {} },
+    encyclopediaRewards: {},
+    villageBonuses: { stamina: 0, check: 0 },
+    diningTable: null,
+    driftBottles: [],
     toolsSharpenedToday: false,
     legendaryCompleted: false,
     legendaryProgress: {},
@@ -187,6 +198,9 @@ export async function createPlayer(roomId, playerInput, ownerUid) {
     const roomSnap = await tx.get(roomRef);
     if (!roomSnap.exists()) throw new Error('找不到該家庭房間');
     const village = roomSnap.data();
+    const villageStaminaBonus = village.villageBonuses?.stamina || 0;
+    newPlayer.maxStamina = maxStamina + villageStaminaBonus;
+    newPlayer.stamina = newPlayer.maxStamina;
 
     const updatedMoney = (village.sharedMoney || 0) + 300;
     const logs = prependLog(
@@ -233,16 +247,67 @@ export async function runGameTransaction(roomId, playerId, updateCallback) {
 
     const village = roomSnap.data();
     const player = { id: playerSnap.id, ...playerSnap.data() };
+    player.maxStamina = GAME_CONSTANTS.BASE_STAMINA +
+      (player.stats?.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE +
+      (village.villageBonuses?.stamina || 0);
 
     const result = await updateCallback(village, player);
     if (!result) return null;
+
+    if (result.playerUpdates) {
+      const acquiredIds = new Set();
+      const inventoryBefore = Object.fromEntries((playerSnap.data().inventory || []).map(item => [item.itemId, item.count || 0]));
+      const inventoryAfter = Object.fromEntries((result.playerUpdates.inventory || playerSnap.data().inventory || []).map(item => [item.itemId, item.count || 0]));
+      for (const [itemId, count] of Object.entries(inventoryAfter)) {
+        if (count > (inventoryBefore[itemId] || 0)) acquiredIds.add(itemId);
+      }
+
+      const warehouseBefore = village.warehouse || {};
+      const warehouseAfter = result.villageUpdates?.warehouse || warehouseBefore;
+      for (const [itemId, count] of Object.entries(warehouseAfter)) {
+        if (count > (warehouseBefore[itemId] || 0)) acquiredIds.add(itemId);
+      }
+
+      const categoryMap = {
+        fish: 'fish',
+        crop: 'crops',
+        forage_ore: 'forage',
+        forage_wood: 'forage',
+        forage_herb: 'forage',
+        cooking: 'cooking'
+      };
+      const encyclopedia = Object.fromEntries(
+        Object.entries(village.encyclopedia || {}).map(([category, entries]) => [category, { ...entries }])
+      );
+      let foundNewItem = false;
+      for (const itemId of acquiredIds) {
+        const category = categoryMap[ITEMS[itemId]?.category];
+        if (!category || encyclopedia[category]?.[itemId]) continue;
+        encyclopedia[category] ||= {};
+        encyclopedia[category][itemId] = {
+          discoveredBy: player.name,
+          season: village.season,
+          day: village.day,
+          discoveredAt: Date.now()
+        };
+        foundNewItem = true;
+      }
+      if (foundNewItem) {
+        result.villageUpdates = { ...(result.villageUpdates || {}), encyclopedia };
+      }
+    }
 
     if (result.villageUpdates) {
       tx.update(roomRef, result.villageUpdates);
     }
     if (result.playerUpdates) {
+      const nextStats = result.playerUpdates.stats || player.stats || {};
+      const nextMaxStamina = GAME_CONSTANTS.BASE_STAMINA +
+        (nextStats.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE +
+        (village.villageBonuses?.stamina || 0);
       tx.update(playerRef, {
         ...result.playerUpdates,
+        maxStamina: nextMaxStamina,
         lastActiveAt: Date.now()
       });
     }
@@ -274,11 +339,12 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
 
     const me = latestPlayers.find(p => p.id === playerId);
     if (!me) return;
+    const bed = getPlayerBedSlot(latestPlayers, playerId);
     if (
-      me.location !== 'farm' ||
-      Math.hypot((me.posX || 0) - 210, (me.posY || 0) - 215) > 75
+      me.location !== 'house_interior' ||
+      Math.hypot((me.posX || 0) - bed.x, (me.posY || 0) - bed.y) > 45
     ) {
-      throw new Error('請先回到農場農舍床鋪旁，才能上床睡覺喔！');
+      throw new Error('請先進入家族農舍並走到床鋪旁，才能上床睡覺喔！');
     }
 
     me.isSleeping = true;
@@ -287,9 +353,9 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
     const sleepUpdates = {
       isSleeping: true,
       readyToSleep: true,
-      location: 'farm',
-      posX: 210,
-      posY: 215,
+      location: 'house_interior',
+      posX: bed.x,
+      posY: bed.y,
       lastActiveAt: now
     };
     if (Number.isFinite(personalTime)) {
@@ -368,13 +434,14 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
       startedAt: now,
       expiresAt: now + 2600
     };
+    const bed = getPlayerBedSlot(latestPlayers, playerId);
     const passOutTime = Math.max(1560, personalTime, me.personalTime || 360);
     me.isSleeping = true;
     me.readyToSleep = true;
     me.personalTime = passOutTime;
-    me.location = 'farm';
-    me.posX = 210;
-    me.posY = 215;
+    me.location = 'house_interior';
+    me.posX = bed.x;
+    me.posY = bed.y;
     me.lastActiveAt = now;
 
     const activePlayers = latestPlayers.filter(
@@ -411,9 +478,9 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
       isSleeping: true,
       readyToSleep: true,
       personalTime: passOutTime,
-      location: 'farm',
-      posX: 210,
-      posY: 215,
+      location: 'house_interior',
+      posX: bed.x,
+      posY: bed.y,
       passOutAnimation,
       lastActiveAt: now
     });
@@ -433,11 +500,8 @@ export async function cancelSleepWaiting(roomId, playerId, personalTime = null) 
     if (!playerSnap.exists()) throw new Error('找不到玩家資料，請重新連線後再試。');
 
     const player = playerSnap.data();
-    if (
-      player.location !== 'farm' ||
-      Math.hypot((player.posX || 0) - 210, (player.posY || 0) - 215) > 75
-    ) {
-      throw new Error('請回到農場農舍床鋪旁，才能取消等待。');
+    if (player.location !== 'house_interior') {
+      throw new Error('請回到家族農舍床鋪旁，才能取消等待。');
     }
 
     if (!player.readyToSleep && !player.isSleeping) return false;
@@ -531,12 +595,14 @@ function computeNextDayState(village, allPlayers, now) {
   const tomorrowWeather = rollWeatherForSeason(nextSeason, todayWeather);
   const weatherDef = WEATHER_TYPES[todayWeather];
   const isRaining = Boolean(weatherDef?.autoWater);
+  const sprinklerBuilt = Boolean(village.villageProjects?.sprinkler?.completed);
+  const feederBuilt = Boolean(village.villageProjects?.feeder?.completed);
   const isTyphoon = todayWeather === 'typhoon';
 
   // 更新農田生長
   const nextPlots = (village.farmPlots || []).map(plot => {
     if (!plot.cleared || !plot.cropId) {
-      return { ...plot, isWatered: isRaining };
+      return { ...plot, isWatered: false };
     }
     let nextGrown = plot.daysGrown + (plot.isWatered ? 1 : 0);
     // 颱風天戶外未收成作物有 50% 機率受損倒退 1 天成長
@@ -546,7 +612,7 @@ function computeNextDayState(village, allPlayers, now) {
     return {
       ...plot,
       daysGrown: nextGrown,
-      isWatered: isRaining // 若今天下雨自動幫全村澆水
+      isWatered: isRaining || sprinklerBuilt
     };
   });
 
@@ -557,10 +623,12 @@ function computeNextDayState(village, allPlayers, now) {
     const ready = animal.productReady || (def && nextDays >= def.prodDays);
     return {
       ...animal,
-      fedToday: false,
+      fedToday: feederBuilt,
       daysSinceProduce: ready ? 0 : nextDays,
       productReady: ready,
-      intimacy: animal.fedToday ? animal.intimacy : Math.max(0, (animal.intimacy || 0) - 2)
+      intimacy: feederBuilt
+        ? Math.min(100, (animal.intimacy || 0) + 5)
+        : animal.fedToday ? animal.intimacy : Math.max(0, (animal.intimacy || 0) - 2)
     };
   });
 
@@ -599,13 +667,17 @@ function computeNextDayState(village, allPlayers, now) {
 
   // 重置每位玩家的隔日狀態（處理晚睡懲罰 & 寒流小感冒）
   const wasColdWave = village.weather === 'cold_wave';
+  const orderedPlayers = [...allPlayers].sort((a, b) => String(a.id).localeCompare(String(b.id)));
   const playerUpdatesList = allPlayers.map(p => {
-    const maxStam = GAME_CONSTANTS.BASE_STAMINA + (p.stats?.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE;
+    const maxStam = GAME_CONSTANTS.BASE_STAMINA +
+      (p.stats?.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE +
+      (village.villageBonuses?.stamina || 0);
     const sleptLate = (p.personalTime || 360) > 1440; // 超過 00:00
     const nextStamina = sleptLate ? Math.floor(maxStam * 0.75) : maxStam;
 
     const hadWarmBuff = (p.dailyBuffs || []).some(b => b.type === 'warm');
     const caughtCold = wasColdWave && !hadWarmBuff;
+    const bed = getPlayerBedSlot(orderedPlayers, p.id);
 
     return {
       ref: p.ref,
@@ -615,9 +687,9 @@ function computeNextDayState(village, allPlayers, now) {
         personalTime: 360, // 06:00
         isSleeping: false,
         readyToSleep: false,
-        location: 'farm',
-        posX: 265,
-        posY: 225,
+        location: 'house_interior',
+        posX: bed.wakeX,
+        posY: bed.wakeY,
         isSick: caughtCold,
         scratchUsedToday: false,
         popularGiftUsedToday: false,
@@ -630,6 +702,22 @@ function computeNextDayState(village, allPlayers, now) {
   const seasonName = GAME_CONSTANTS.SEASONS.find(s => s.id === nextSeason)?.name || nextSeason;
   const summaryLog = `🐓 天亮了！進入【${seasonName} Day ${nextDay}】，今日天氣：${weatherDef?.icon} ${weatherDef?.name}${rescueNotice}`;
 
+  const driftBottles = [...(village.driftBottles || [])];
+  if (WEATHER_TYPES[village.weather]?.autoWater) {
+    const count = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {
+      const onIsland = Math.random() < 0.5;
+      driftBottles.push({
+        id: `${now}-${i}`,
+        mapId: onIsland ? 'coral_island' : 'beach',
+        x: onIsland ? 600 + Math.round(Math.random() * 180) : 390 + Math.round(Math.random() * 150),
+        y: onIsland ? 575 + Math.round(Math.random() * 60) : 545 + Math.round(Math.random() * 80),
+        rewardType: ['money', 'seed', 'clue'][Math.floor(Math.random() * 3)],
+        day: nextDay
+      });
+    }
+  }
+
   return {
     villageUpdates: {
       season: nextSeason,
@@ -641,7 +729,9 @@ function computeNextDayState(village, allPlayers, now) {
       bulletinQuests: nextBulletin,
       recentQuestIds: recentIds,
       farmPlots: nextPlots,
-      livestock: nextLivestock
+      livestock: nextLivestock,
+      diningTable: null,
+      driftBottles
     },
     playerUpdatesList,
     summaryLog

@@ -66,7 +66,11 @@ export function getTotalItemCount(player, warehouse, itemId) {
 function consumeStaminaAndTime(player, village, baseStamina, baseMinutes, isOutdoor = false) {
   let staminaCost = baseStamina;
   const weather = WEATHER_TYPES[village.weather];
-  const buffs = player.dailyBuffs || [];
+  const currentTime = player.personalTime || 360;
+  const buffs = (player.dailyBuffs || []).filter(
+    buff => !Number.isFinite(buff.expiresAt) || currentTime < buff.expiresAt
+  );
+  const familyBuff = buffs.some(buff => buff.type === 'family_meal');
 
   if (isOutdoor) {
     if (weather?.staminaMod) staminaCost += weather.staminaMod;
@@ -78,6 +82,7 @@ function consumeStaminaAndTime(player, village, baseStamina, baseMinutes, isOutd
       staminaCost += 1;
     }
   }
+  if (familyBuff) staminaCost -= 2;
   staminaCost = Math.max(1, staminaCost);
 
   const isWorkaholic = player.traits?.includes('workaholic');
@@ -97,7 +102,7 @@ function consumeStaminaAndTime(player, village, baseStamina, baseMinutes, isOutd
 
   return {
     nextStamina: player.stamina - staminaCost,
-    nextPersonalTime: (player.personalTime || 360) + minutesCost,
+    nextPersonalTime: currentTime + minutesCost,
     staminaSpent: staminaCost
   };
 }
@@ -536,14 +541,17 @@ export async function actionBuyAnimal(roomId, playerId, animalType) {
 // 三、 海邊釣魚（含魚餌與漁夫被動）與山海採集挖礦
 // ============================================================================
 
-export async function actionFish(roomId, playerId, baitId = null, effectiveTime = null) {
+export async function actionFish(roomId, playerId, baitId = null, effectiveTime = null, mapId = 'beach') {
   return await runGameTransaction(roomId, playerId, (village, player) => {
+    if (player.location !== mapId || !['beach', 'coral_island'].includes(mapId)) {
+      throw new Error('請先走到漁港或珊瑚礁離島的釣點再釣魚。');
+    }
     if (WEATHER_TYPES[village.weather]?.lockOutdoor) {
       throw new Error('🌪️ 外面正值狂風暴雨颱風天，港邊已封閉無法出海釣魚！');
     }
 
     const actionCfg = { ...LOCATION_ACTIONS.beach.find(a => a.id === 'go_fishing') };
-    actionCfg.toolBonus = getRequiredToolBonus(player, 'fishing_rod');
+    actionCfg.toolBonus = getRequiredToolBonus(player, 'fishing_rod') + (mapId === 'coral_island' ? 2 : 0);
     const actionTime = Number.isFinite(effectiveTime) ? effectiveTime : (player.personalTime || 360);
     const minuteOfDay = getMinuteOfDay(actionTime);
     const actionPlayer = { ...player, personalTime: actionTime };
@@ -567,9 +575,16 @@ export async function actionFish(roomId, playerId, baitId = null, effectiveTime 
     const isFisher = player.mainClass === 'fisher';
     const isThunderAfternoon = village.weather === 'thunderstorm' && minuteOfDay >= 840;
 
-    const candidates = FISHING_POOL.filter(f =>
-      fishLv >= f.minSkill && isTimeWindowOpen(f.timeWindow, minuteOfDay)
-    ).map(f => {
+    const islandPool = [
+      { itemId: 'lobster', minSkill: 1, weight: 26, dc: 12 },
+      { itemId: 'grouper', minSkill: 1, weight: 24, dc: 13 },
+      { itemId: 'rainbow_wrasse', minSkill: 2, weight: 22, dc: 14 },
+      { itemId: 'coral_grouper', minSkill: 2, weight: 22, dc: 14 },
+      { itemId: 'starlight_grouper', minSkill: 9, weight: 6, dc: 20, timeWindow: 'night' }
+    ];
+    const candidates = (mapId === 'coral_island' ? islandPool : FISHING_POOL)
+      .filter(f => fishLv >= f.minSkill && isTimeWindowOpen(f.timeWindow, minuteOfDay))
+      .map(f => {
       let w = isNight && f.nightBonusWeight ? f.nightBonusWeight : f.weight;
       if (f.seasonBonus === village.season) w *= 1.5;
       if (f.minSkill >= 4) {
@@ -577,20 +592,13 @@ export async function actionFish(roomId, playerId, baitId = null, effectiveTime 
         if (isFisher) w *= 1.35;
         if (isThunderAfternoon) w *= 1.4;
       }
-      return { ...f, weight: w };
-    });
+        return { ...f, weight: w };
+      });
 
     const targetFish = pickWeighted(candidates);
     actionCfg.dc = Math.max(7, targetFish.dc - baitBonus);
 
-    const toolCategoryByAction = {
-      beach_combing: 'trowel',
-      chop_wood: 'axe',
-      mine_ore: 'pickaxe'
-    };
-    const toolCategory = toolCategoryByAction[actionId];
-    const toolBonus = toolCategory ? getRequiredToolBonus(player, toolCategory) : 0;
-    const check = performSkillCheck(player, village, { ...actionCfg, toolBonus });
+    const check = performSkillCheck(actionPlayer, village, actionCfg);
     let msg = '';
     let caughtId = null;
     let caughtCount = 0;
@@ -611,7 +619,8 @@ export async function actionFish(roomId, playerId, baitId = null, effectiveTime 
     }
 
     const xpRes = grantExperience(player, 'fishing', check.isCritSuccess ? 55 : check.isSuccess ? 32 : 15, 15);
-    const logLine = `🎣 ${player.name} 在漁港釣魚（d20=${check.roll}+${check.totalMod}=${check.totalScore} vs DC${check.effectiveDC}）：${msg}`;
+    const logPlace = mapId === 'coral_island' ? '珊瑚礁離島' : '漁港';
+    const logLine = `🎣 ${player.name} 在${logPlace}釣魚（d20=${check.roll}+${check.totalMod}=${check.totalScore} vs DC${check.effectiveDC}）：${msg}`;
 
     return {
       villageUpdates: {
@@ -692,7 +701,7 @@ export async function actionForageOrMine(roomId, playerId, actionId, effectiveTi
     const minuteOfDay = getMinuteOfDay(actionTime);
     const actionPlayer = { ...player, personalTime: actionTime };
     const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(actionPlayer, village, actionCfg.stamina, actionCfg.minutes, true);
-    const check = performSkillCheck(player, village, actionCfg);
+    const check = performSkillCheck(actionPlayer, village, actionCfg);
     const isForager = player.mainClass === 'forager';
     const forageLv = player.skills?.foraging?.level || 1;
     const isNight = minuteOfDay >= 1080 || minuteOfDay < 360;
@@ -747,11 +756,24 @@ export async function actionForageOrMine(roomId, playerId, actionId, effectiveTi
 
     const xpRes = grantExperience(player, 'foraging', check.isCritSuccess ? 50 : check.isSuccess ? 30 : 14, 15);
     const logLine = `🪓 ${player.name} 執行【${actionCfg.name.split('（')[0]}】（d20=${check.roll}+${check.totalMod}=${check.totalScore} vs DC${check.effectiveDC}）：${msg}`;
+    let encounter = null;
+    const pendingEncounters = { ...(village.pendingEncounters || {}) };
+    if (!pendingEncounters[playerId] && ['mine_ore', 'chop_wood'].includes(actionId) && Math.random() < 0.15) {
+      encounter = {
+        id: `${Date.now()}_${playerId}`,
+        title: actionId === 'mine_ore' ? '礦坑深處的回聲' : '林間迷路的山羌',
+        description: actionId === 'mine_ore'
+          ? '岩壁忽然傳來清脆回聲，像是有什麼東西藏在鬆動的石縫後。'
+          : '一隻受困的山羌出現在樹叢間，你得冷靜判斷如何接近。'
+      };
+      pendingEncounters[playerId] = encounter;
+    }
 
     return {
       villageUpdates: {
         sharedMoney: village.sharedMoney,
         warehouse: box,
+        ...(encounter ? { pendingEncounters } : {}),
         activityLogs: prependLog(village.activityLogs, logLine, check.isCritSuccess)
       },
       playerUpdates: {
@@ -763,7 +785,395 @@ export async function actionForageOrMine(roomId, playerId, actionId, effectiveTi
         xp: xpRes.xp,
         freeStatPoints: xpRes.freeStatPoints
       },
-      payload: { check, message: msg, levelUpNotes: xpRes.levelUpNotes }
+      payload: { check, message: msg, levelUpNotes: xpRes.levelUpNotes, encounter }
+    };
+  });
+}
+
+export async function actionIslandTidepool(roomId, playerId, effectiveTime = null) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    if (player.location !== 'coral_island') throw new Error('請先走到珊瑚礁離島東岸潮間帶。');
+    if (WEATHER_TYPES[village.weather]?.lockOutdoor) throw new Error('颱風天礁岸封閉，暫時無法趕海。');
+
+    const actionCfg = { ...LOCATION_ACTIONS.beach.find(action => action.id === 'beach_combing') };
+    actionCfg.toolBonus = getRequiredToolBonus(player, 'trowel');
+    const time = Number.isFinite(effectiveTime) ? effectiveTime : (player.personalTime || 360);
+    const actionPlayer = { ...player, personalTime: time };
+    const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(
+      actionPlayer, village, actionCfg.stamina, actionCfg.minutes, true
+    );
+    const check = performSkillCheck(actionPlayer, village, actionCfg);
+    const pool = [
+      { itemId: 'pearl_oyster', weight: 36 },
+      { itemId: 'glowing_conch', weight: 28 },
+      { itemId: 'rare_seastar', weight: 12 },
+      { itemId: 'wakame', weight: 24 }
+    ];
+    const picked = pickWeighted(pool);
+    const itemId = check.isSuccess ? picked.itemId : 'wakame';
+    const count = check.isCritSuccess ? 2 : 1;
+    const { inventory, warehouse } = giveItemsSmart(player, village.warehouse, itemId, count);
+    const message = check.isSuccess
+      ? `在東岸潮間帶撿到「${ITEMS[itemId].name} x${count}」！`
+      : `潮水退去後只找到「${ITEMS[itemId].name} x1」。`;
+    const xp = grantExperience(player, 'foraging', check.isSuccess ? 30 : 14, 15);
+
+    return {
+      villageUpdates: {
+        warehouse,
+        activityLogs: prependLog(village.activityLogs, `🐚 ${player.name} 在離島趕海：${message}`, check.isCritSuccess)
+      },
+      playerUpdates: {
+        stamina: nextStamina,
+        personalTime: nextPersonalTime,
+        inventory,
+        skills: xp.skills,
+        level: xp.level,
+        xp: xp.xp,
+        freeStatPoints: xp.freeStatPoints
+      },
+      payload: { check, message, levelUpNotes: xp.levelUpNotes }
+    };
+  });
+}
+
+export async function actionIslandTreasure(roomId, playerId, effectiveTime = null) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    if (player.location !== 'coral_island') throw new Error('請先走到珊瑚礁離島中央古代石陣。');
+    if (WEATHER_TYPES[village.weather]?.lockOutdoor) throw new Error('颱風天石陣暫停開放探索。');
+
+    const dayKey = `${village.season || 'spring'}_${village.day || 1}`;
+    const previous = village.islandTreasureClaims || { dayKey, playerIds: [] };
+    const claims = previous.dayKey === dayKey ? [...(previous.playerIds || [])] : [];
+    if (claims.includes(playerId)) throw new Error('今天已經探索過古代石陣，明天再來看看吧。');
+
+    const time = Number.isFinite(effectiveTime) ? effectiveTime : (player.personalTime || 360);
+    const actionPlayer = { ...player, personalTime: time };
+    const { nextStamina, nextPersonalTime } = consumeStaminaAndTime(actionPlayer, village, 12, 35, true);
+    const actionCfg = { stat: 'knowledge', skill: 'foraging', dc: 15, isOutdoor: true };
+    const check = performSkillCheck(actionPlayer, village, actionCfg);
+    const pool = [
+      { itemId: 'diamond', weight: 8 },
+      { itemId: 'gold_ore', weight: 28 },
+      { itemId: 'ancient_coin', weight: 24 },
+      { itemId: 'taiwan_blue_sapphire', weight: 12 },
+      { itemId: 'treasure_map_fragment', weight: 28 }
+    ];
+    let inventory = player.inventory;
+    let warehouse = village.warehouse;
+    let message = '古代石陣沒有回應你的探索，今天的機會已用完。';
+    if (check.isSuccess) {
+      const prize = pickWeighted(pool);
+      ({ inventory, warehouse } = giveItemsSmart(player, warehouse, prize.itemId, check.isCritSuccess ? 2 : 1));
+      message = `石陣中發現了「${ITEMS[prize.itemId].name}」！`;
+    }
+    claims.push(playerId);
+
+    const pendingEncounters = { ...(village.pendingEncounters || {}) };
+    let encounter = null;
+    if (!pendingEncounters[playerId] && Math.random() < 0.15) {
+      encounter = {
+        id: `${Date.now()}_${playerId}`,
+        title: '石陣中的古老守望者',
+        description: '一道古老的身影從石柱間浮現，似乎願意以考驗換取寶藏。'
+      };
+      pendingEncounters[playerId] = encounter;
+    }
+    const xp = grantExperience(player, 'foraging', check.isSuccess ? 38 : 18, 18);
+
+    return {
+      villageUpdates: {
+        warehouse,
+        islandTreasureClaims: { dayKey, playerIds: claims },
+        ...(encounter ? { pendingEncounters } : {}),
+        activityLogs: prependLog(village.activityLogs, `🗿 ${player.name} 探索古代石陣：${message}`, check.isCritSuccess)
+      },
+      playerUpdates: {
+        stamina: nextStamina,
+        personalTime: nextPersonalTime,
+        inventory,
+        skills: xp.skills,
+        level: xp.level,
+        xp: xp.xp,
+        freeStatPoints: xp.freeStatPoints
+      },
+      payload: { check, message, levelUpNotes: xp.levelUpNotes, encounter }
+    };
+  });
+}
+
+export async function actionResolveEncounter(roomId, playerId, statKey) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    const encounter = village.pendingEncounters?.[playerId];
+    if (!encounter) throw new Error('這張奇遇事件卡已結束或不存在。');
+    const options = {
+      physique: { stat: 'physique', skill: 'foraging', label: '力量' },
+      perception: { stat: 'perception', skill: 'foraging', label: '敏捷' },
+      knowledge: { stat: 'knowledge', skill: 'foraging', label: '智慧' }
+    };
+    const choice = options[statKey];
+    if (!choice) throw new Error('請選擇力量、敏捷或智慧檢定。');
+    const check = performSkillCheck(player, village, { stat: choice.stat, skill: choice.skill, dc: 13, isOutdoor: false });
+    const pendingEncounters = { ...(village.pendingEncounters || {}) };
+    delete pendingEncounters[playerId];
+
+    let inventory = player.inventory;
+    let warehouse = village.warehouse;
+    let villageXp = village.villageXp || 0;
+    let villageLevel = village.villageLevel || 1;
+    let message = `奇遇檢定失敗，${encounter.title}的線索消失了。`;
+    if (check.isSuccess) {
+      const gem = pickWeighted([
+        { itemId: 'agate', weight: 45 },
+        { itemId: 'white_quartz', weight: 35 },
+        { itemId: 'taiwan_blue_sapphire', weight: 20 }
+      ]);
+      ({ inventory, warehouse } = giveItemsSmart(player, warehouse, gem.itemId, 1));
+      ({ villageLevel, villageXp } = grantVillageXp(village, 12));
+      message = `以${choice.label}通過奇遇考驗，取得「${ITEMS[gem.itemId].name}」，全村發展經驗 +12！`;
+    }
+
+    return {
+      villageUpdates: {
+        pendingEncounters,
+        warehouse,
+        villageLevel,
+        villageXp,
+        activityLogs: prependLog(village.activityLogs, `🎴 ${player.name} 遭遇【${encounter.title}】：${message}`, check.isCritSuccess)
+      },
+      playerUpdates: { inventory },
+      payload: { check, message }
+    };
+  });
+}
+
+export async function actionCollectDriftBottle(roomId, playerId, bottleId) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    const bottles = [...(village.driftBottles || [])];
+    const index = bottles.findIndex(bottle => bottle.id === bottleId);
+    if (index < 0) throw new Error('這個漂流瓶已經被其他家人撿走了。');
+    const bottle = bottles[index];
+    if (player.location !== bottle.mapId) throw new Error('請到漂流瓶所在的沙灘再撿拾。');
+
+    let inventory = player.inventory;
+    let warehouse = village.warehouse;
+    let sharedMoney = village.sharedMoney || 0;
+    let rewardMessage = '';
+    if (bottle.rewardType === 'money') {
+      const amount = 120 + Math.floor(Math.random() * 181);
+      sharedMoney += amount;
+      rewardMessage = `全村公款增加 ${amount} 元`;
+    } else {
+      const itemId = bottle.rewardType === 'seed'
+        ? pickWeighted([{ itemId: 'seed_strawberry', weight: 1 }, { itemId: 'seed_tomato', weight: 1 }, { itemId: 'seed_pomelo', weight: 1 }]).itemId
+        : 'treasure_map_fragment';
+      ({ inventory, warehouse } = giveItemsSmart(player, warehouse, itemId, 1));
+      rewardMessage = `獲得「${ITEMS[itemId].name} x1」`;
+    }
+    bottles.splice(index, 1);
+    return {
+      villageUpdates: {
+        driftBottles: bottles,
+        sharedMoney,
+        warehouse,
+        activityLogs: prependLog(village.activityLogs, `🍾 ${player.name} 撿起神秘漂流瓶，${rewardMessage}！`, true)
+      },
+      playerUpdates: { inventory },
+      payload: { message: `打開漂流瓶：${rewardMessage}！` }
+    };
+  });
+}
+
+const VILLAGE_PROJECTS = {
+  sprinkler: { name: '農田自動灑水器', target: 1500 },
+  feeder: { name: '牧場自動飼料槽', target: 2000 },
+  fishing_boat: { name: '修復海伯的遠洋漁船', target: 3000 }
+};
+
+function getVillageProjects(village) {
+  return Object.fromEntries(Object.entries(VILLAGE_PROJECTS).map(([id, definition]) => {
+    const stored = village.villageProjects?.[id] || {};
+    const progress = Math.min(definition.target, stored.progress || 0);
+    return [id, {
+      ...definition,
+      progress,
+      completed: Boolean(stored.completed || progress >= definition.target)
+    }];
+  }));
+}
+
+export async function actionContributeVillageProject(roomId, playerId, projectId, amount) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    const definition = VILLAGE_PROJECTS[projectId];
+    if (!definition) throw new Error('找不到這項小鎮建設。');
+    if (player.location !== 'town') throw new Error('請到村莊廣場王村長宅邸旁的募資板投入公款。');
+    const requestedAmount = Math.floor(Number(amount));
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) throw new Error('投入金額必須大於 0。');
+    const projects = getVillageProjects(village);
+    const project = projects[projectId];
+    if (project.completed) throw new Error('這項建設已經完成，不需要再投入公款。');
+    const remaining = project.target - project.progress;
+    const invested = Math.min(requestedAmount, remaining);
+    if ((village.sharedMoney || 0) < invested) throw new Error(`全村公款不足，目前有 ${village.sharedMoney || 0} 元。`);
+
+    project.progress += invested;
+    project.completed = project.progress >= project.target;
+    const message = project.completed
+      ? `投入 ${invested} 元完成【${project.name}】！`
+      : `投入 ${invested} 元推進【${project.name}】（${project.progress}/${project.target}）。`;
+    return {
+      villageUpdates: {
+        villageProjects: projects,
+        sharedMoney: (village.sharedMoney || 0) - invested,
+        activityLogs: prependLog(village.activityLogs, `🏗️ ${player.name} ${message}`, project.completed)
+      },
+      playerUpdates: {},
+      payload: { message }
+    };
+  });
+}
+
+export async function actionPlaceDiningDish(roomId, playerId, itemId, playersSnapshot = []) {
+  const roomRef = doc(db, 'rooms', roomId);
+  const playerRef = doc(db, 'rooms', roomId, 'players', playerId);
+  const now = Date.now();
+
+  return await runTransaction(db, async tx => {
+    const [roomSnap, playerSnap] = await Promise.all([tx.get(roomRef), tx.get(playerRef)]);
+    if (!roomSnap.exists() || !playerSnap.exists()) throw new Error('資料讀取失敗，請重新整理頁面。');
+    const village = roomSnap.data();
+    const player = { id: playerSnap.id, ...playerSnap.data() };
+    if (player.location !== 'house_interior') throw new Error('請回到家族農舍餐桌旁擺放料理。');
+    if (village.diningTable) throw new Error('餐桌上已有料理，先請家人享用吧。');
+    const item = ITEMS[itemId];
+    if (item?.category !== 'cooking' || !item.staminaRestore) throw new Error('只能擺放已烹調完成、可回復體力的料理。');
+
+    const nextInventory = [...(player.inventory || [])].map(entry => ({ ...entry }));
+    const itemIndex = nextInventory.findIndex(entry => entry.itemId === itemId && entry.count > 0);
+    if (itemIndex < 0) throw new Error('請先將料理放在自己的背包中，再擺上餐桌。');
+    nextInventory[itemIndex].count -= 1;
+    if (nextInventory[itemIndex].count <= 0) nextInventory.splice(itemIndex, 1);
+
+    const participantIds = [...new Set([playerId, ...playersSnapshot.map(entry => entry.id)])];
+    const otherIds = participantIds.filter(id => id !== playerId);
+    const participantSnaps = await Promise.all(
+      otherIds.map(id => tx.get(doc(db, 'rooms', roomId, 'players', id)))
+    );
+    const participants = [{ id: playerId, ...player }, ...participantSnaps
+      .filter(snap => snap.exists())
+      .map(snap => ({ id: snap.id, ...snap.data() }))]
+      .filter(member => member.id === playerId || now - (member.lastActiveAt || 0) <= 10 * 60 * 1000)
+      .map(member => member.id);
+    const diningTable = {
+      itemId,
+      placedBy: playerId,
+      participants,
+      eatenBy: [],
+      placedAt: now,
+      season: village.season,
+      day: village.day
+    };
+    tx.update(roomRef, {
+      diningTable,
+      activityLogs: prependLog(village.activityLogs, `🍲 ${player.name} 把「${item.name}」擺上家族餐桌，邀請在線家人圍爐。`, false)
+    });
+    tx.update(playerRef, { inventory: nextInventory, lastActiveAt: now });
+    return { message: `已將「${item.name}」擺上餐桌，家人可以各自享用一次。` };
+  });
+}
+
+export async function actionEatDiningTable(roomId, playerId, effectiveTime = null) {
+  return await runGameTransaction(roomId, playerId, (village, player) => {
+    const table = village.diningTable;
+    if (!table || !ITEMS[table.itemId]) throw new Error('餐桌上目前沒有料理。');
+    if (player.location !== 'house_interior') throw new Error('請回到家族農舍餐桌旁享用料理。');
+    if (!(table.participants || []).includes(playerId)) throw new Error('這道料理是為擺桌時在線的家人準備的。');
+    if ((table.eatenBy || []).includes(playerId)) throw new Error('你已經享用過這道圍爐料理了。');
+
+    const item = ITEMS[table.itemId];
+    const restore = Math.floor(item.staminaRestore / 2);
+    const nextStamina = Math.min(player.maxStamina, player.stamina + restore);
+    const currentTime = Math.max(
+      player.personalTime || 360,
+      Number.isFinite(effectiveTime) ? effectiveTime : 0
+    );
+    const nextBuffs = (player.dailyBuffs || []).filter(buff =>
+      !Number.isFinite(buff.expiresAt) || currentTime < buff.expiresAt
+    );
+    nextBuffs.push({
+      type: 'family_meal',
+      expiresAt: currentTime + 180,
+      desc: '家人圍爐：所有 d20 檢定 +1、行動體力消耗 -2'
+    });
+    const eatenBy = [...(table.eatenBy || []), playerId];
+    const finished = table.participants.every(id => eatenBy.includes(id));
+    const nextTable = finished ? null : { ...table, eatenBy };
+    const message = `圍爐享用了「${item.name}」，恢復 ${restore} 點體力，獲得 180 分鐘家人圍爐 Buff！`;
+
+    return {
+      villageUpdates: {
+        diningTable: nextTable,
+        activityLogs: prependLog(village.activityLogs, `🍽️ ${player.name} ${message}${finished ? ' 餐桌料理已享用完畢。' : ''}`, false)
+      },
+      playerUpdates: { stamina: nextStamina, personalTime: currentTime, dailyBuffs: nextBuffs },
+      payload: { message }
+    };
+  });
+}
+
+export async function actionClaimEncyclopediaReward(roomId, playerId, threshold, playersSnapshot = []) {
+  const roomRef = doc(db, 'rooms', roomId);
+  const playerRefs = [...new Set([playerId, ...playersSnapshot.map(player => player.id)])]
+    .map(id => doc(db, 'rooms', roomId, 'players', id));
+
+  return await runTransaction(db, async tx => {
+    const roomSnap = await tx.get(roomRef);
+    if (!roomSnap.exists()) throw new Error('找不到家庭房間。');
+    const playerSnaps = await Promise.all(playerRefs.map(ref => tx.get(ref)));
+    const meSnap = playerSnaps.find(snap => snap.id === playerId);
+    if (!meSnap?.exists()) throw new Error('找不到玩家資料。');
+    const village = roomSnap.data();
+    const player = { id: meSnap.id, ...meSnap.data() };
+    if (player.location !== 'town') throw new Error('請到王村長宅邸旁領取圖鑑里程碑獎勵。');
+    if (![10, 25, 50].includes(threshold)) throw new Error('無效的圖鑑里程碑。');
+
+    const entries = Object.values(village.encyclopedia || {}).flatMap(group => Object.keys(group || {}));
+    const discoveredCount = new Set(entries).size;
+    const rewardKey = String(threshold);
+    if (discoveredCount < threshold) throw new Error(`全村圖鑑目前點亮 ${discoveredCount} 種，還需要 ${threshold - discoveredCount} 種。`);
+    if (village.encyclopediaRewards?.[rewardKey]) throw new Error('這項里程碑獎勵已經領取過了。');
+
+    const bonuses = { stamina: 0, check: 0, ...(village.villageBonuses || {}) };
+    if (threshold === 25) bonuses.check += 1;
+    else bonuses.stamina += 10;
+    const rewards = { ...(village.encyclopediaRewards || {}), [rewardKey]: true };
+    const villageUpdates = {
+      villageBonuses: bonuses,
+      encyclopediaRewards: rewards,
+      activityLogs: prependLog(village.activityLogs, `📚 ${player.name} 完成山海博物誌 ${threshold} 種收藏里程碑，全村獲得永久獎勵！`, true)
+    };
+    const playerUpdates = playerSnaps
+      .filter(snap => snap.exists())
+      .map(snap => {
+        const member = snap.data();
+        return {
+          ref: snap.ref,
+          maxStamina: GAME_CONSTANTS.BASE_STAMINA +
+            (member.stats?.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE +
+            bonuses.stamina,
+          ...(snap.id === playerId ? { lastActiveAt: Date.now() } : {})
+        };
+      });
+
+    tx.update(roomRef, villageUpdates);
+    for (const update of playerUpdates) {
+      const { ref, ...updates } = update;
+      tx.update(ref, updates);
+    }
+    return {
+      message: threshold === 25
+        ? '山海博物誌達成 25 種收藏，全村永久檢定 +1！'
+        : `山海博物誌達成 ${threshold} 種收藏，全村體力上限永久 +10！`
     };
   });
 }
@@ -1325,7 +1735,9 @@ export async function completeSeasonalQuestCheck(roomId, playerId, allPlayersSna
     for (const member of latestPlayers) {
       const nextStats = { ...(member.stats || {}) };
       nextStats[rewardStat] = (nextStats[rewardStat] || 0) + 1;
-      const nextMaxStam = GAME_CONSTANTS.BASE_STAMINA + (nextStats.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE;
+      const nextMaxStam = GAME_CONSTANTS.BASE_STAMINA +
+        (nextStats.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE +
+        (village.villageBonuses?.stamina || 0);
 
       const memberUpdates = {
         stats: nextStats,
@@ -1646,7 +2058,9 @@ export async function allocateFreeStatPoint(roomId, playerId, statKey) {
 
     const nextStats = { ...(player.stats || {}) };
     nextStats[statKey] = (nextStats[statKey] || 0) + 1;
-    const nextMaxStam = GAME_CONSTANTS.BASE_STAMINA + (nextStats.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE;
+    const nextMaxStam = GAME_CONSTANTS.BASE_STAMINA +
+      (nextStats.physique || 0) * GAME_CONSTANTS.STAMINA_PER_PHYSIQUE +
+      (village.villageBonuses?.stamina || 0);
 
     return {
       playerUpdates: {

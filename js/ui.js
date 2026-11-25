@@ -27,6 +27,7 @@ import {
 
 import { AVATAR_OPTIONS, getDefaultAvatarConfig, renderAvatarSVG, renderNpcAvatarSVG } from './avatar-svg.js';
 import { calculateCheckModifiers } from './dice-engine.js';
+import { getPlayerBedSlot } from '../data/world-layout.js';
 import {
   subscribeRoom,
   initOrGetRoom,
@@ -62,7 +63,15 @@ import {
   allocateFreeStatPoint,
   actionRestFastForward,
   buildStarterToolsState,
-  actionForgeTool
+  actionForgeTool,
+  actionIslandTidepool,
+  actionIslandTreasure,
+  actionCollectDriftBottle,
+  actionContributeVillageProject,
+  actionPlaceDiningDish,
+  actionEatDiningTable,
+  actionClaimEncyclopediaReward,
+  actionResolveEncounter
 } from './game-logic.js';
 
 // ============================================================================
@@ -302,6 +311,13 @@ function getAdjustedActionStaminaCost(animation) {
     if (state.village?.season === 'summer' && !getMe()?.dailyBuffs?.some(buff => buff.type === 'cool_down')) cost += 1;
     if (state.village?.season === 'winter') cost += 1;
   }
+  const me = getMe();
+  const currentTime = me ? getEffectivePersonalTime(me) : 360;
+  if (me?.dailyBuffs?.some(buff =>
+    buff.type === 'family_meal' &&
+    Number.isFinite(buff.expiresAt) &&
+    currentTime < buff.expiresAt
+  )) cost -= 2;
   return Math.max(1, cost);
 }
 
@@ -365,7 +381,8 @@ async function connectToRoom(roomIdInput, autoLoginPlayerId = null) {
         if (prevDay !== undefined && (villageData.day !== prevDay || villageData.season !== prevSeason)) {
           resetLocalPersonalClock();
           if (typeof soundFX !== 'undefined') soundFX.playRooster();
-          worldMap.teleportLocalPlayer('farm', 265, 225);
+          const wakeSlot = getPlayerBedSlot(state.players, state.playerId);
+          worldMap.teleportLocalPlayer('house_interior', wakeSlot.wakeX, wakeSlot.wakeY);
         }
         if (getMe()) renderGameScreen();
       },
@@ -947,7 +964,8 @@ function renderActionTab(village, me) {
       onMovementSyncError: () => showToast('角色位置同步遭拒；請確認 Firebase 已部署角色所有權規則。', 'error'),
       onActionSyncError: () => showToast('角色動作同步失敗，請檢查網路連線。', 'error'),
       onCancelSleep: () => cancelSleepWait(getMe()),
-      onInteract: (obj) => {
+      onLockedExit: (exit) => showToast(`⛵ ${exit.label}，請先完成遠洋漁船修復募資。`, 'info'),
+      onInteract: async (obj) => {
         const curVillage = state.village;
         const curMe = getMe();
         if (!curVillage || !curMe) return;
@@ -955,6 +973,20 @@ function renderActionTab(village, me) {
         if (obj.type === 'sleep') {
           if (curMe.readyToSleep || curMe.isSleeping) cancelSleepWait(curMe);
           else openSleepModal(curVillage, curMe);
+        } else if (obj.type === 'house_enter') {
+          worldMap.switchToMap('house_interior', 480, 605);
+        } else if (obj.type === 'wardrobe') {
+          openWardrobeModal(curMe);
+        } else if (obj.type === 'dining_table') {
+          if (curVillage.diningTable) {
+            runAction(() => actionEatDiningTable(state.roomId, curMe.id, getEffectivePersonalTime(curMe)), { skipDice: true });
+          } else {
+            openDiningDishModal(curVillage, curMe);
+          }
+        } else if (obj.type === 'village_projects') {
+          openVillageProjectsModal(curVillage);
+        } else if (obj.type === 'encyclopedia') {
+          openEncyclopediaModal(curVillage);
         } else if (obj.type === 'farm_plot') {
           const plot = curVillage.farmPlots[obj.plotIndex];
           if (plot.cleared && !plot.cropId) openSeedPickerModal(curVillage, curMe, obj.plotIndex, obj);
@@ -992,6 +1024,21 @@ function renderActionTab(village, me) {
           runAction(() => actionFish(state.roomId, curMe.id, state.selectedBait || null, getEffectivePersonalTime(curMe)), {
             animation: { toolCategory: 'fishing_rod', label: '港邊釣魚', staminaCost: 10, isOutdoor: true, x: obj.x, y: obj.y }
           });
+        } else if (obj.type === 'island_fishing') {
+          runAction(() => actionFish(state.roomId, curMe.id, state.selectedBait || null, getEffectivePersonalTime(curMe), 'coral_island'), {
+            animation: { toolCategory: 'fishing_rod', label: '珊瑚礁深水釣魚', staminaCost: 10, isOutdoor: true, x: obj.x, y: obj.y }
+          });
+        } else if (obj.type === 'island_tidepool') {
+          runAction(() => actionIslandTidepool(state.roomId, curMe.id, getEffectivePersonalTime(curMe)), {
+            animation: { toolCategory: 'trowel', label: '離島潮間帶趕海', staminaCost: 8, isOutdoor: true, x: obj.x, y: obj.y }
+          });
+        } else if (obj.type === 'island_treasure') {
+          const result = await runAction(() => actionIslandTreasure(state.roomId, curMe.id, getEffectivePersonalTime(curMe)), {
+            animation: { toolCategory: 'pickaxe', label: '石陣尋寶', staminaCost: 12, isOutdoor: true, x: obj.x, y: obj.y }
+          });
+          if (result?.encounter) openEncounterModal(result.encounter);
+        } else if (obj.type === 'drift_bottle') {
+          runAction(() => actionCollectDriftBottle(state.roomId, curMe.id, obj.bottleId), { skipDice: true });
         } else if (obj.type === 'mountain_act') {
           const toolCategory = obj.actionId === 'mine_ore'
             ? 'pickaxe'
@@ -1000,7 +1047,7 @@ function renderActionTab(village, me) {
               : obj.actionId === 'beach_combing' ? 'trowel' : 'harvest';
           const actionConfig = [...LOCATION_ACTIONS.beach, ...LOCATION_ACTIONS.mountain]
             .find(action => action.id === obj.actionId);
-          runAction(() => actionForageOrMine(state.roomId, curMe.id, obj.actionId, getEffectivePersonalTime(curMe)), {
+          const result = await runAction(() => actionForageOrMine(state.roomId, curMe.id, obj.actionId, getEffectivePersonalTime(curMe)), {
             animation: {
               toolCategory,
               label: obj.label,
@@ -1010,6 +1057,7 @@ function renderActionTab(village, me) {
               y: obj.y
             }
           });
+          if (result?.encounter) openEncounterModal(result.encounter);
         }
       }
     }
@@ -1708,6 +1756,163 @@ function openGenericModal(title, bodyHtml) {
 
 function closeGenericModal() {
   document.getElementById('generic-modal').classList.add('hidden');
+}
+
+function openDiningDishModal(village, me) {
+  const dishes = (me.inventory || [])
+    .map(entry => ({ item: ITEMS[entry.itemId], count: entry.count, itemId: entry.itemId }))
+    .filter(entry => entry.item?.category === 'cooking' && entry.item.staminaRestore > 0);
+  openGenericModal('🍲 擺上家族餐桌', `
+    <p class="text-xs text-stone-600">從背包選一道料理擺上桌；擺放時在線的家人都能各享用一次。擺桌會扣除一份料理。</p>
+    ${dishes.length ? `
+      <div class="space-y-2">${dishes.map(({ item, itemId, count }) => `
+        <button data-dining-dish="${itemId}" class="w-full p-3 rounded-xl border border-amber-300 bg-amber-50 text-left flex justify-between items-center">
+          <span class="font-bold">${item.icon} ${escapeHtml(item.name)} <span class="text-stone-500">x${count}</span></span>
+          <span class="text-xs text-emerald-700 font-bold">恢復 ${Math.floor(item.staminaRestore / 2)} 體力</span>
+        </button>
+      `).join('')}</div>
+    ` : '<p class="p-3 text-center text-xs text-stone-500 bg-stone-50 rounded-xl">背包裡沒有可上桌的料理；先到陳阿嬤廚房烹飪吧。</p>'}
+  `);
+  document.querySelectorAll('[data-dining-dish]').forEach(button => {
+    button.addEventListener('click', () => {
+      const itemId = button.dataset.diningDish;
+      closeGenericModal();
+      runAction(() => actionPlaceDiningDish(state.roomId, me.id, itemId, state.players), { skipDice: true });
+    });
+  });
+}
+
+function openVillageProjectsModal(village) {
+  const projects = [
+    { id: 'sprinkler', name: '農田自動灑水器', target: 1500, reward: '每日 06:00 自動灑濕所有已播種農田' },
+    { id: 'feeder', name: '牧場自動飼料槽', target: 2000, reward: '每日自動餵食動物並加快親密度成長' },
+    { id: 'fishing_boat', name: '修復海伯的遠洋漁船', target: 3000, reward: '解鎖前往珊瑚礁離島的航線' }
+  ];
+  const balances = village.villageProjects || {};
+  openGenericModal('🏗️ 小鎮建設募資', `
+    <p class="text-xs text-stone-600">以全村公款共同推進永久建設，目前公款：<strong>${village.sharedMoney || 0} 元</strong>。</p>
+    <div class="space-y-2">${projects.map(project => {
+      const status = balances[project.id] || {};
+      const progress = Math.min(project.target, status.progress || 0);
+      const complete = Boolean(status.completed || progress >= project.target);
+      const remaining = project.target - progress;
+      return `
+        <div class="p-3 rounded-xl border border-amber-200 bg-amber-50 space-y-1.5">
+          <div class="flex justify-between gap-2 text-xs font-black"><span>${project.name}</span><span>${complete ? '✅ 完成' : `${progress}/${project.target} 元`}</span></div>
+          <p class="text-[11px] text-stone-600">${project.reward}</p>
+          <div class="h-2 rounded-full bg-stone-200 overflow-hidden"><div class="h-full bg-emerald-600" style="width:${Math.round(progress / project.target * 100)}%"></div></div>
+          ${complete ? '' : `<div class="flex gap-2">${[100, 500, remaining].filter((amount, index, list) => amount <= remaining && list.indexOf(amount) === index).map(amount => `
+            <button data-project="${project.id}" data-amount="${amount}" class="flex-1 py-1.5 rounded-lg bg-emerald-700 text-white text-[11px] font-bold">投入 ${amount} 元</button>
+          `).join('')}</div>`}
+        </div>
+      `;
+    }).join('')}</div>
+  `);
+  document.querySelectorAll('[data-project]').forEach(button => {
+    button.addEventListener('click', () => {
+      const projectId = button.dataset.project;
+      const amount = Number(button.dataset.amount);
+      closeGenericModal();
+      runAction(() => actionContributeVillageProject(state.roomId, getMe().id, projectId, amount), { skipDice: true });
+    });
+  });
+}
+
+function openEncyclopediaModal(village) {
+  const groups = [
+    ['fish', '🐟 漁獲'],
+    ['crops', '🌱 作物'],
+    ['forage', '⛰️ 山產'],
+    ['cooking', '🍲 料理']
+  ];
+  const encyclopedia = village.encyclopedia || {};
+  const foundCount = new Set(groups.flatMap(([key]) => Object.keys(encyclopedia[key] || {}))).size;
+  const rewards = village.encyclopediaRewards || {};
+  const milestones = [10, 25, 50];
+  openGenericModal('📖 山海博物誌', `
+    <p class="text-xs text-stone-600">全村已發現 <strong>${foundCount}</strong> 種。首次取得物品的家人與發現天數會共同記錄。</p>
+    <div class="grid grid-cols-3 gap-1.5">${milestones.map(threshold => `
+      <button data-encyclopedia-reward="${threshold}" ${foundCount < threshold || rewards[String(threshold)] ? 'disabled' : ''} class="p-2 rounded-lg text-[10px] font-bold border ${foundCount >= threshold && !rewards[String(threshold)] ? 'bg-amber-200 border-amber-400' : 'bg-stone-100 border-stone-200 opacity-60'}">
+        ${rewards[String(threshold)] ? '✅' : foundCount >= threshold ? '🎁' : '🔒'} ${threshold} 種
+      </button>
+    `).join('')}</div>
+    <div class="max-h-64 overflow-y-auto space-y-2">${groups.map(([key, title]) => {
+      const entries = Object.entries(encyclopedia[key] || {});
+      return `<section class="p-2 rounded-xl bg-amber-50 border border-amber-200">
+        <h4 class="text-xs font-black text-amber-900">${title} (${entries.length})</h4>
+        ${entries.length ? entries.map(([itemId, record]) => `
+          <div class="text-[11px] flex justify-between gap-2 py-1 border-b border-amber-100">
+            <span>${ITEMS[itemId]?.icon || '📦'} ${escapeHtml(ITEMS[itemId]?.name || itemId)}</span>
+            <span class="text-stone-500">${escapeHtml(record.discoveredBy || '家人')} · ${escapeHtml(record.season || '')} Day ${record.day || '?'}</span>
+          </div>
+        `).join('') : '<p class="text-[11px] text-stone-500 mt-1">尚無發現</p>'}
+      </section>`;
+    }).join('')}</div>
+    <p class="text-[10px] text-stone-500">里程碑：10 種全村體力上限 +10；25 種全村檢定 +1；50 種再增加體力上限 +10。</p>
+  `);
+  document.querySelectorAll('[data-encyclopedia-reward]').forEach(button => {
+    button.addEventListener('click', () => {
+      const threshold = Number(button.dataset.encyclopediaReward);
+      closeGenericModal();
+      runAction(() => actionClaimEncyclopediaReward(state.roomId, getMe().id, threshold, state.players), { skipDice: true });
+    });
+  });
+}
+
+function openEncounterModal(encounter) {
+  openGenericModal(`🎴 奇遇事件：${escapeHtml(encounter.title)}`, `
+    <p class="text-sm leading-relaxed text-stone-700">${escapeHtml(encounter.description)}</p>
+    <p class="text-xs text-amber-900 font-bold">選擇一項 d20 檢定（DC 13）；成功可獲得寶石與全村發展經驗。</p>
+    <div class="grid grid-cols-3 gap-2">
+      <button data-encounter-stat="physique" class="p-2 rounded-xl bg-red-700 text-white text-xs font-black">💪 力量</button>
+      <button data-encounter-stat="perception" class="p-2 rounded-xl bg-sky-700 text-white text-xs font-black">👣 敏捷</button>
+      <button data-encounter-stat="knowledge" class="p-2 rounded-xl bg-indigo-700 text-white text-xs font-black">📖 智慧</button>
+    </div>
+  `);
+  document.querySelectorAll('[data-encounter-stat]').forEach(button => {
+    button.addEventListener('click', () => {
+      const statKey = button.dataset.encounterStat;
+      closeGenericModal();
+      runAction(() => actionResolveEncounter(state.roomId, getMe().id, statKey));
+    });
+  });
+}
+
+function openWardrobeModal(me) {
+  const config = me.avatarConfig || getDefaultAvatarConfig();
+  const field = (key, title, choices) => `
+    <label class="block text-xs font-bold text-stone-700">${title}
+      <select id="wardrobe-${key}" class="mt-1 w-full rounded-lg border border-amber-300 bg-white p-2 text-xs">
+        ${choices.map(choice => `<option value="${choice.id}" ${config[key] === choice.id ? 'selected' : ''}>${escapeHtml(choice.name)}</option>`).join('')}
+      </select>
+    </label>
+  `;
+  openGenericModal('👘 家族衣櫃', `
+    <div class="grid grid-cols-2 gap-2">
+      ${field('hairStyle', '髮型', AVATAR_OPTIONS.hairStyles)}
+      ${field('hairColor', '髮色', AVATAR_OPTIONS.hairColors)}
+      ${field('outfit', '服裝', AVATAR_OPTIONS.outfits)}
+      ${field('accessory', '帽子／配件', AVATAR_OPTIONS.accessories)}
+    </div>
+    <p class="text-[11px] text-stone-500">可更換髮型、過年紅唐裝、冒險小披風與帽子。</p>
+    <button id="btn-wardrobe-save" class="w-full py-2 rounded-xl bg-emerald-700 text-white font-black text-xs">儲存造型</button>
+  `);
+  document.getElementById('btn-wardrobe-save')?.addEventListener('click', async () => {
+    const avatarConfig = { ...config };
+    for (const key of ['hairStyle', 'hairColor', 'outfit', 'accessory']) {
+      avatarConfig[key] = document.getElementById(`wardrobe-${key}`).value;
+    }
+    try {
+      await updatePlayerPresence(state.roomId, me.id, { avatarConfig });
+      me.avatarConfig = avatarConfig;
+      closeGenericModal();
+      renderGameScreen();
+      showToast('已儲存新的紙娃娃造型！', 'success');
+    } catch (error) {
+      console.error(error);
+      showToast(error.message || '衣櫃儲存失敗，請檢查網路連線。', 'error');
+    }
+  });
 }
 
 function openSeedPickerModal(village, me, plotIndex, actionPosition = null) {
@@ -2468,6 +2673,7 @@ async function passOutAtTwoAm(me, personalTime) {
     );
     if (result?.alreadySleeping) {
       const currentMe = getMe() || me;
+      const bed = getPlayerBedSlot(state.players, currentMe.id);
       currentMe.isSleeping = true;
       currentMe.readyToSleep = true;
       currentMe.personalTime = Math.max(
@@ -2475,9 +2681,9 @@ async function passOutAtTwoAm(me, personalTime) {
         toDayTimelineMinutes(currentMe.personalTime ?? 360)
       );
       currentMe.effectiveTime = currentMe.personalTime;
-      currentMe.location = 'farm';
-      currentMe.posX = 210;
-      currentMe.posY = 215;
+      currentMe.location = 'house_interior';
+      currentMe.posX = bed.x;
+      currentMe.posY = bed.y;
       worldMap.cancelPassOutAnimation();
       state.isPassOutInProgress = false;
       state.passOutRetryAt = Date.now() + 30_000;
@@ -2485,21 +2691,22 @@ async function passOutAtTwoAm(me, personalTime) {
       return;
     }
     const currentMe = getMe() || me;
+    const bed = getPlayerBedSlot(state.players, currentMe.id);
     if (result?.dayAdvanced) {
       currentMe.isSleeping = false;
       currentMe.readyToSleep = false;
-      currentMe.location = 'farm';
-      currentMe.posX = 265;
-      currentMe.posY = 225;
+      currentMe.location = 'house_interior';
+      currentMe.posX = bed.wakeX;
+      currentMe.posY = bed.wakeY;
       resetLocalPersonalClock();
     } else {
       currentMe.isSleeping = true;
       currentMe.readyToSleep = true;
       currentMe.personalTime = result?.personalTime ?? frozenTime;
       currentMe.effectiveTime = currentMe.personalTime;
-      currentMe.location = 'farm';
-      currentMe.posX = 210;
-      currentMe.posY = 215;
+      currentMe.location = 'house_interior';
+      currentMe.posX = bed.x;
+      currentMe.posY = bed.y;
     }
 
     const remaining = Math.max(0, animation.expiresAt - Date.now());
@@ -2591,7 +2798,8 @@ async function sleepAtHome(me, forceAFK = false) {
     );
     if (previousDay !== undefined && state.village?.day !== previousDay) {
       resetLocalPersonalClock();
-      worldMap.teleportLocalPlayer('farm', 265, 225);
+      const wakeSlot = getPlayerBedSlot(state.players, me.id);
+      worldMap.teleportLocalPlayer('house_interior', wakeSlot.wakeX, wakeSlot.wakeY);
       renderGameScreen();
     }
     showToast(forceAFK ? '已為全村關燈並結算進入新的一天！' : '已上床休息，等待家人就寢。', forceAFK ? 'success' : 'info');

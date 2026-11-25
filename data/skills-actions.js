@@ -134,7 +134,8 @@ export const WEATHER_TYPES = {
     icon: '⛈️',
     seasons: ['summer'],
     weight: 15,
-    desc: '14:00 後海邊大魚活躍（釣魚稀有率提升），但深山挖礦小心打雷！',
+    desc: '農田自動澆水；14:00 後海邊大魚活躍，但深山挖礦小心打雷！',
+    autoWater: true,
     staminaMod: 0,
     dcMod: 0
   },
@@ -154,7 +155,8 @@ export const WEATHER_TYPES = {
     icon: '🌪️',
     seasons: [], // 僅由前一天的 typhoon_warning 觸發
     weight: 0,
-    desc: '狂風暴雨！海邊與深山暫時封閉，大家在室內做料理、鍛造或聊天吧！',
+    desc: '狂風暴雨！農田自動澆水，海邊與深山暫時封閉。',
+    autoWater: true,
     lockOutdoor: true,
     staminaMod: 0,
     dcMod: 0
@@ -171,7 +173,7 @@ export const WEATHER_TYPES = {
   }
 };
 
-// 方案 A：五大地點定義
+// 各地點定義
 export const LOCATIONS = {
   farm: {
     id: 'farm',
@@ -200,6 +202,20 @@ export const LOCATIONS = {
     icon: '🎣',
     bgGradient: 'from-sky-100 to-cyan-50',
     desc: '海風徐徐的漁港與潮間帶，白天可釣魚與撿海帶芽，夜晚有機會抓到新鮮小管！'
+  },
+  house_interior: {
+    id: 'house_interior',
+    name: '家族農舍',
+    icon: '🏡',
+    bgGradient: 'from-amber-100 to-orange-50',
+    desc: '家人共用的溫暖農舍，有床鋪、衣櫃與家族圍爐餐桌。'
+  },
+  coral_island: {
+    id: 'coral_island',
+    name: '珊瑚礁離島',
+    icon: '🏝️',
+    bgGradient: 'from-cyan-100 to-teal-50',
+    desc: '搭乘修復完成的遠洋漁船前往，探索石陣、礁岩與深水漁場。'
   },
   mountain: {
     id: 'mountain',

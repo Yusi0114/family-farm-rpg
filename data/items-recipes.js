@@ -81,6 +81,11 @@ export const ITEMS = {
   glowing_conch: { id: 'glowing_conch', name: '夜光蠑螺', icon: '🐚', category: 'forage_ore', sellPrice: 210, staminaRestore: 12, desc: '夜晚退潮時才會在潮間帶發出微光' },
   firefly_herb: { id: 'firefly_herb', name: '螢光仙草葉', icon: '🌿', category: 'forage_ore', sellPrice: 180, staminaRestore: 12, desc: '夜間在深山草叢裡閃著微光的藥草' },
   moon_reishi: { id: 'moon_reishi', name: '月華紫靈芝', icon: '🍄', category: 'forage_ore', sellPrice: 360, staminaRestore: 15, desc: '只在月光下生長的稀有紫靈芝' },
+  pearl_oyster: { id: 'pearl_oyster', name: '珍珠貝', icon: '🦪', category: 'forage_ore', sellPrice: 260, staminaRestore: 10, desc: '珊瑚礁潮間帶偶爾能找到的珍貝' },
+  rare_seastar: { id: 'rare_seastar', name: '稀有海星', icon: '⭐', category: 'forage_ore', sellPrice: 420, desc: '色彩斑斕的離島海星' },
+  ancient_coin: { id: 'ancient_coin', name: '古代金幣', icon: '🪙', category: 'forage_ore', sellPrice: 600, desc: '石陣中出土的古代貨幣' },
+  treasure_map_fragment: { id: 'treasure_map_fragment', name: '藏寶圖碎片', icon: '🗺️', category: 'forage_ore', sellPrice: 80, desc: '漂流瓶中發現的手繪藏寶線索' },
+  diamond: { id: 'diamond', name: '鑽石', icon: '💎', category: 'forage_ore', sellPrice: 950 },
 
   // ================= 漁獲海產 =================
   chub: { id: 'chub', name: '溪哥', icon: '🐟', category: 'fish', sellPrice: 40, staminaRestore: 8 },
@@ -98,6 +103,8 @@ export const ITEMS = {
   dusk_cuttlefish: { id: 'dusk_cuttlefish', name: '晚霞花枝', icon: '🦑', category: 'fish', sellPrice: 230, staminaRestore: 20, desc: '黃昏時分在港灣覓食的花枝' },
   sunset_bream: { id: 'sunset_bream', name: '夕陽赤鯮', icon: '🐟', category: 'fish', sellPrice: 260, staminaRestore: 20, desc: '只在夕陽染紅海面時活躍' },
   starlight_grouper: { id: 'starlight_grouper', name: '星斑龍膽石斑', icon: '🐠', category: 'fish', sellPrice: 900, staminaRestore: 32, desc: '深夜才會現身的傳說魚王' },
+  rainbow_wrasse: { id: 'rainbow_wrasse', name: '七彩蘇眉魚', icon: '🐠', category: 'fish', sellPrice: 680, staminaRestore: 28, desc: '珊瑚礁離島限定漁獲' },
+  coral_grouper: { id: 'coral_grouper', name: '珊瑚石斑', icon: '🐟', category: 'fish', sellPrice: 560, staminaRestore: 25, desc: '珊瑚礁離島限定漁獲' },
 
   // ================= 畜牧產品 =================
   egg: { id: 'egg', name: '土雞蛋', icon: '🥚', category: 'ranch', sellPrice: 40, staminaRestore: 10 },
