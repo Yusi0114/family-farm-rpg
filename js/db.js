@@ -17,7 +17,12 @@ import { ITEMS } from '../data/items-recipes.js';
 import { buildStarterToolsState } from './tool-utils.js';
 import { WEATHER_TYPES, ANIMAL_TYPES } from '../data/skills-actions.js';
 import { SEASONAL_QUESTS, LEGENDARY_PROJECT, BULLETIN_QUEST_POOL } from '../data/npcs-quests.js';
-import { getPlayerBedSlot } from '../data/world-layout.js';
+import {
+  BED_SLOTS,
+  getAvailableBedSlotIndex,
+  getPlayerBedSlot,
+  getPlayerBedSlotIndex
+} from '../data/world-layout.js';
 
 const ONLINE_TIMEOUT_MS = 10 * 60 * 1000; // 10 分鐘內有操作視為「在線」
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -318,7 +323,7 @@ export async function runGameTransaction(roomId, playerId, updateCallback) {
 /**
  * 切換玩家上床睡覺狀態；若在線玩家全數睡覺則自動執行換日結算
  */
-export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSnapshot, forceAFK = false, personalTime = null) {
+export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSnapshot, forceAFK = false, personalTime = null, requestedBedIndex = null) {
   const roomRef = doc(db, 'rooms', roomId);
   const now = Date.now();
 
@@ -339,7 +344,11 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
 
     const me = latestPlayers.find(p => p.id === playerId);
     if (!me) return;
-    const bed = getPlayerBedSlot(latestPlayers, playerId);
+    const bedIndex = getAvailableBedSlotIndex(latestPlayers, requestedBedIndex, playerId);
+    if (bedIndex === -1 || bedIndex === null) {
+      throw new Error('這張床已經有人休息了，請選擇另一張空床。');
+    }
+    const bed = BED_SLOTS[bedIndex];
     if (
       me.location !== 'house_interior' ||
       Math.hypot((me.posX || 0) - bed.x, (me.posY || 0) - bed.y) > 45
@@ -349,10 +358,12 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
 
     me.isSleeping = true;
     me.readyToSleep = true;
+    me.sleepBedIndex = bedIndex;
     me.lastActiveAt = now;
     const sleepUpdates = {
       isSleeping: true,
       readyToSleep: true,
+      sleepBedIndex: bedIndex,
       location: 'house_interior',
       posX: bed.x,
       posY: bed.y,
@@ -377,7 +388,11 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
         now
       );
 
-      villageUpdates.activityLogs = prependLog(village.activityLogs, summaryLog, true);
+      villageUpdates.activityLogs = prependLog(
+        prependLog(village.activityLogs, summaryLog, true),
+        `🛏️ ${me.name} 已在第 ${bedIndex + 1} 號床休息`,
+        false
+      );
       tx.update(roomRef, villageUpdates);
 
       for (const pu of playerUpdatesList) {
@@ -393,7 +408,7 @@ export async function goToSleepAndMaybeAdvanceDay(roomId, playerId, allPlayersSn
       const waitingNames = activePlayers.filter(p => !p.isSleeping).map(p => p.name).join('、');
       const logs = prependLog(
         village.activityLogs,
-        `🛏️ ${me.name} 已上床休息（等待在線家人：${waitingNames}）`,
+        `🛏️ ${me.name} 已在第 ${bedIndex + 1} 號床休息（等待在線家人：${waitingNames}）`,
         false
       );
       tx.update(roomRef, { activityLogs: logs });
@@ -421,7 +436,11 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
     const me = latestPlayers.find(p => p.id === playerId);
     if (!me) throw new Error('找不到玩家資料，請重新連線後再試。');
     if (me.isSleeping || me.readyToSleep) {
-      return { dayAdvanced: false, alreadySleeping: true };
+      return {
+        dayAdvanced: false,
+        alreadySleeping: true,
+        sleepBedIndex: getPlayerBedSlotIndex(latestPlayers, playerId)
+      };
     }
     if (!Number.isFinite(personalTime) || personalTime < 1560) {
       throw new Error('必須到凌晨 02:00 才會因體力耗盡昏倒。');
@@ -434,10 +453,13 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
       startedAt: now,
       expiresAt: now + 2600
     };
-    const bed = getPlayerBedSlot(latestPlayers, playerId);
+    const bedIndex = getAvailableBedSlotIndex(latestPlayers, null, playerId);
+    if (bedIndex < 0) throw new Error('目前沒有空床可以休息，請稍後再試。');
+    const bed = BED_SLOTS[bedIndex];
     const passOutTime = Math.max(1560, personalTime, me.personalTime || 360);
     me.isSleeping = true;
     me.readyToSleep = true;
+    me.sleepBedIndex = bedIndex;
     me.personalTime = passOutTime;
     me.location = 'house_interior';
     me.posX = bed.x;
@@ -448,7 +470,7 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
       p => p.id === playerId || (now - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS)
     );
     const allActiveSleeping = activePlayers.every(p => p.isSleeping);
-    const passOutLog = `🫠 ${me.name} 凌晨 02:00 體力耗盡，被家人扛回農舍休息。`;
+    const passOutLog = `🫠 ${me.name} 凌晨 02:00 體力耗盡，被家人扛回第 ${bedIndex + 1} 號床休息。`;
 
     if (allActiveSleeping) {
       const village = roomSnap.data();
@@ -471,12 +493,18 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
             : playerUpdate.updates
         );
       }
-      return { dayAdvanced: true, alreadySleeping: false, personalTime: passOutTime };
+      return {
+        dayAdvanced: true,
+        alreadySleeping: false,
+        personalTime: passOutTime,
+        sleepBedIndex: bedIndex
+      };
     }
 
     tx.update(me.ref, {
       isSleeping: true,
       readyToSleep: true,
+      sleepBedIndex: bedIndex,
       personalTime: passOutTime,
       location: 'house_interior',
       posX: bed.x,
@@ -487,7 +515,12 @@ export async function actionPassOut(roomId, playerId, allPlayersSnapshot, person
     tx.update(roomRef, {
       activityLogs: prependLog(roomSnap.data().activityLogs, passOutLog, false)
     });
-    return { dayAdvanced: false, alreadySleeping: false, personalTime: passOutTime };
+    return {
+      dayAdvanced: false,
+      alreadySleeping: false,
+      personalTime: passOutTime,
+      sleepBedIndex: bedIndex
+    };
   });
 }
 
@@ -512,6 +545,7 @@ export async function cancelSleepWaiting(roomId, playerId, personalTime = null) 
     tx.update(playerRef, {
       isSleeping: false,
       readyToSleep: false,
+      sleepBedIndex: null,
       personalTime: frozenTime,
       lastActiveAt: now
     });
@@ -687,6 +721,7 @@ function computeNextDayState(village, allPlayers, now) {
         personalTime: 360, // 06:00
         isSleeping: false,
         readyToSleep: false,
+        sleepBedIndex: null,
         location: 'house_interior',
         posX: bed.wakeX,
         posY: bed.wakeY,

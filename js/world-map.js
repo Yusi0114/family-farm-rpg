@@ -6,7 +6,7 @@ import { NPCS } from '../data/npcs-quests.js';
 import { renderAvatarSVG, renderNpcAvatarSVG, renderChibiPlayerSVG, renderChibiNpcSVG } from './avatar-svg.js';
 import { updatePlayerPresence } from './db.js';
 import { soundFX } from './sound-fx.js';
-import { BED_SLOTS, getPlayerBedSlot } from '../data/world-layout.js';
+import { BED_SLOTS, getBedOccupant, getPlayerBedSlot } from '../data/world-layout.js';
 
 const MAP_W = 960;
 const MAP_H = 720;
@@ -732,11 +732,17 @@ class WorldMapController {
     }).join('');
   }
 
-  isAtSleepSpot() {
+  isAtSleepSpot(bedIndex = null) {
     if (this.currentMapId !== 'house_interior') return false;
-    return Math.hypot(this.localPos.x - 245, this.localPos.y - 390) <= 130 ||
-      Math.hypot(this.localPos.x - 720, this.localPos.y - 435) <= 120 ||
-      BED_SLOTS.some(bed => Math.hypot(this.localPos.x - bed.x, this.localPos.y - bed.y) <= 64);
+    if (Number.isInteger(bedIndex) && BED_SLOTS[bedIndex]) {
+      const bed = BED_SLOTS[bedIndex];
+      return Math.hypot(this.localPos.x - bed.x, this.localPos.y - bed.y) <= 64;
+    }
+    return BED_SLOTS.some(bed => Math.hypot(this.localPos.x - bed.x, this.localPos.y - bed.y) <= 64);
+  }
+
+  getBedOccupant(bedIndex, excludePlayerId = null) {
+    return getBedOccupant(this.players, bedIndex, excludePlayerId);
   }
 
   isLocalSleepLocked() {
@@ -796,8 +802,9 @@ class WorldMapController {
     animation?.resolve?.();
   }
 
-  prepareForSleep() {
-    const bed = getPlayerBedSlot(this.players, this.meId);
+  prepareForSleep(bedIndex) {
+    const bed = BED_SLOTS[bedIndex];
+    if (!bed) throw new Error('找不到指定床位，請重新選擇床鋪。');
     this.currentMapId = 'house_interior';
     this.localPos.x = bed.x;
     this.localPos.y = bed.y;
@@ -809,16 +816,20 @@ class WorldMapController {
     return { location: 'house_interior', posX: bed.x, posY: bed.y };
   }
 
-  setLocalSleepWaiting(ready) {
+  setLocalSleepWaiting(ready, bedIndex = null) {
     const me = this.players.find(player => player.id === this.meId);
     if (me) {
       me.readyToSleep = ready;
       me.isSleeping = ready;
       if (ready) {
-        const bed = getPlayerBedSlot(this.players, this.meId);
+        const bed = BED_SLOTS[bedIndex];
+        if (!bed) throw new Error('找不到指定床位，請重新選擇床鋪。');
+        me.sleepBedIndex = bedIndex;
         me.location = 'house_interior';
         me.posX = bed.x;
         me.posY = bed.y;
+      } else {
+        me.sleepBedIndex = null;
       }
     }
   }
@@ -832,6 +843,7 @@ class WorldMapController {
       me.posY = y;
       me.readyToSleep = false;
       me.isSleeping = false;
+      me.sleepBedIndex = null;
     }
     this.switchToMap(targetMapId, x, y);
   }
@@ -1006,14 +1018,13 @@ class WorldMapController {
         ...BED_SLOTS.map((bed, index) => ({
           id: `bed_${index}`,
           type: 'sleep',
+          bedIndex: index,
           x: bed.x,
           y: bed.y,
           radius: 64,
           icon: '🛏️',
           label: '😴 上床睡覺'
         })),
-        { id: 'left_beds', type: 'sleep', x: 245, y: 390, radius: 130, icon: '🛏️', label: '😴 上床睡覺' },
-        { id: 'right_beds', type: 'sleep', x: 720, y: 435, radius: 120, icon: '🛏️', label: '😴 上床睡覺' },
         {
           id: 'family_table',
           type: 'dining_table',
@@ -1521,7 +1532,12 @@ class WorldMapController {
       const d = Math.hypot(this.localPos.x - obj.x, this.localPos.y - obj.y);
       if (obj.type === 'sleep' && d <= obj.radius) {
         minDist = d;
-        closest = obj;
+        const occupant = this.getBedOccupant(obj.bedIndex, this.meId);
+        closest = {
+          ...obj,
+          occupiedBy: occupant,
+          label: occupant ? `💤 ${occupant.name} 正在休息` : obj.label
+        };
       } else if (closest?.type !== 'sleep' && d <= obj.radius && d < minDist) {
         minDist = d;
         closest = obj;
@@ -1631,6 +1647,7 @@ class WorldMapController {
     for (const p of this.players) {
       const isMe = p.id === this.meId;
       const isOnline = isMe || (Date.now() - (p.lastActiveAt || 0) <= ONLINE_TIMEOUT_MS);
+      const isSleeping = Boolean(p.readyToSleep || p.isSleeping);
       const passOut = isMe ? this.passOutAnimation : p.passOutAnimation;
       const isBeingCarried = Boolean(
         passOut && (isMe || passOut.expiresAt > renderNow) && passOut.location === this.currentMapId
@@ -1640,7 +1657,7 @@ class WorldMapController {
         : isBeingCarried
           ? passOut.location
           : (p.location || 'town');
-      if (!isOnline || pLoc !== this.currentMapId) continue;
+      if ((!isOnline && !isSleeping) || pLoc !== this.currentMapId) continue;
 
       const pos = isMe
         ? this.localPos
@@ -2381,6 +2398,7 @@ class WorldMapController {
     const activeQuests = this.village.quests || this.village.dailyQuests || [];
 
     for (const obj of this.interactables) {
+      if (obj.type === 'sleep') continue;
       if (obj.type === 'npc' && this.isNpcOffWork()) continue;
       const isHighlighted = this.nearestInteractable?.id === obj.id;
 

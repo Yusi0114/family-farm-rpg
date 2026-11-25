@@ -27,7 +27,7 @@ import {
 
 import { AVATAR_OPTIONS, getDefaultAvatarConfig, renderAvatarSVG, renderNpcAvatarSVG } from './avatar-svg.js';
 import { calculateCheckModifiers } from './dice-engine.js';
-import { getPlayerBedSlot } from '../data/world-layout.js';
+import { getPlayerBedSlot, getPlayerBedSlotIndex } from '../data/world-layout.js';
 import {
   subscribeRoom,
   initOrGetRoom,
@@ -972,7 +972,14 @@ function renderActionTab(village, me) {
 
         if (obj.type === 'sleep') {
           if (curMe.readyToSleep || curMe.isSleeping) cancelSleepWait(curMe);
-          else openSleepModal(curVillage, curMe);
+          else {
+            const occupant = worldMap.getBedOccupant(obj.bedIndex, curMe.id);
+            if (occupant) {
+              showToast(`${occupant.name} 正在這張床上休息，請選擇其他床鋪。`, 'info');
+            } else {
+              openSleepModal(curVillage, curMe, obj.bedIndex);
+            }
+          }
         } else if (obj.type === 'house_enter') {
           worldMap.switchToMap('house_interior', 480, 605);
         } else if (obj.type === 'wardrobe') {
@@ -1880,6 +1887,7 @@ function openEncounterModal(encounter) {
 
 function openWardrobeModal(me) {
   const config = me.avatarConfig || getDefaultAvatarConfig();
+  let previewConfig = { ...config };
   const field = (key, title, choices) => `
     <label class="block text-xs font-bold text-stone-700">${title}
       <select id="wardrobe-${key}" class="mt-1 w-full rounded-lg border border-amber-300 bg-white p-2 text-xs">
@@ -1888,6 +1896,10 @@ function openWardrobeModal(me) {
     </label>
   `;
   openGenericModal('👘 家族衣櫃', `
+    <div class="flex flex-col items-center rounded-2xl border-2 border-amber-200 bg-gradient-to-b from-amber-50 to-orange-100 p-3 shadow-inner">
+      <div id="wardrobe-avatar-preview" class="drop-shadow-md">${renderAvatarSVG(previewConfig, 176)}</div>
+      <div class="mt-1 rounded-full bg-amber-900/90 px-3 py-1 text-xs font-black text-amber-50">${escapeHtml(me.name)} 的目前造型</div>
+    </div>
     <div class="grid grid-cols-2 gap-2">
       ${field('hairStyle', '髮型', AVATAR_OPTIONS.hairStyles)}
       ${field('hairColor', '髮色', AVATAR_OPTIONS.hairColors)}
@@ -1897,11 +1909,15 @@ function openWardrobeModal(me) {
     <p class="text-[11px] text-stone-500">可更換髮型、過年紅唐裝、冒險小披風與帽子。</p>
     <button id="btn-wardrobe-save" class="w-full py-2 rounded-xl bg-emerald-700 text-white font-black text-xs">儲存造型</button>
   `);
+  const previewEl = document.getElementById('wardrobe-avatar-preview');
+  for (const key of ['hairStyle', 'hairColor', 'outfit', 'accessory']) {
+    document.getElementById(`wardrobe-${key}`)?.addEventListener('change', event => {
+      previewConfig[key] = event.target.value;
+      previewEl.innerHTML = renderAvatarSVG(previewConfig, 176);
+    });
+  }
   document.getElementById('btn-wardrobe-save')?.addEventListener('click', async () => {
-    const avatarConfig = { ...config };
-    for (const key of ['hairStyle', 'hairColor', 'outfit', 'accessory']) {
-      avatarConfig[key] = document.getElementById(`wardrobe-${key}`).value;
-    }
+    const avatarConfig = { ...previewConfig };
     try {
       await updatePlayerPresence(state.roomId, me.id, { avatarConfig });
       me.avatarConfig = avatarConfig;
@@ -2673,6 +2689,7 @@ async function passOutAtTwoAm(me, personalTime) {
     );
     if (result?.alreadySleeping) {
       const currentMe = getMe() || me;
+      currentMe.sleepBedIndex = result.sleepBedIndex;
       const bed = getPlayerBedSlot(state.players, currentMe.id);
       currentMe.isSleeping = true;
       currentMe.readyToSleep = true;
@@ -2691,6 +2708,7 @@ async function passOutAtTwoAm(me, personalTime) {
       return;
     }
     const currentMe = getMe() || me;
+    currentMe.sleepBedIndex = result?.dayAdvanced ? null : result?.sleepBedIndex;
     const bed = getPlayerBedSlot(state.players, currentMe.id);
     if (result?.dayAdvanced) {
       currentMe.isSleeping = false;
@@ -2765,9 +2783,9 @@ async function cancelSleepWait(me) {
   }
 }
 
-async function sleepAtHome(me, forceAFK = false) {
+async function sleepAtHome(me, bedIndex, forceAFK = false) {
   if (state.isPassOutInProgress) return;
-  if (!worldMap.isAtSleepSpot()) {
+  if (!worldMap.isAtSleepSpot(bedIndex)) {
     showSleepLocationError();
     return;
   }
@@ -2780,8 +2798,8 @@ async function sleepAtHome(me, forceAFK = false) {
   );
   me.personalTime = personalTime;
   me.effectiveTime = personalTime;
-  const sleepPosition = worldMap.prepareForSleep();
-  worldMap.setLocalSleepWaiting(true);
+  const sleepPosition = worldMap.prepareForSleep(bedIndex);
+  worldMap.setLocalSleepWaiting(true, bedIndex);
   renderGameScreen();
   try {
     await updatePlayerPresence(state.roomId, me.id, {
@@ -2794,7 +2812,8 @@ async function sleepAtHome(me, forceAFK = false) {
       me.id,
       state.players,
       forceAFK,
-      personalTime
+      personalTime,
+      bedIndex
     );
     if (previousDay !== undefined && state.village?.day !== previousDay) {
       resetLocalPersonalClock();
@@ -2811,9 +2830,14 @@ async function sleepAtHome(me, forceAFK = false) {
   }
 }
 
-function openSleepModal(village, me) {
-  if (!worldMap.isAtSleepSpot()) {
+function openSleepModal(village, me, bedIndex) {
+  if (!worldMap.isAtSleepSpot(bedIndex)) {
     showSleepLocationError();
+    return;
+  }
+  const occupant = worldMap.getBedOccupant(bedIndex, me.id);
+  if (occupant) {
+    showToast(`${occupant.name} 正在這張床上休息，請選擇其他床鋪。`, 'info');
     return;
   }
 
@@ -2837,14 +2861,16 @@ function openSleepModal(village, me) {
             <span class="font-bold text-stone-800">${escapeHtml(p.name)}</span>
           </div>
           <span class="font-black ${p.isSleeping || p.readyToSleep ? 'text-indigo-600' : 'text-emerald-600'}">
-            ${p.isSleeping || p.readyToSleep ? '💤 已上床睡覺' : '🏃 活動中'}
+            ${p.isSleeping || p.readyToSleep
+              ? `💤 第 ${(Number.isInteger(p.sleepBedIndex) ? p.sleepBedIndex : getPlayerBedSlotIndex(state.players, p.id)) + 1} 號床休息中`
+              : '🏃 活動中'}
           </span>
         </div>
       `).join('')}
     </div>
 
     <button id="btn-confirm-sleep" class="w-full py-3 rounded-2xl bg-indigo-600 active:bg-indigo-700 text-white font-black text-sm shadow-sm">
-      🛏️ 上床睡覺（準備迎接明天）
+      🛏️ 在第 ${bedIndex + 1} 號床休息（準備迎接明天）
     </button>
 
     ${hasAFK ? `
@@ -2857,12 +2883,12 @@ function openSleepModal(village, me) {
 
   document.getElementById('btn-confirm-sleep').addEventListener('click', async () => {
     closeGenericModal();
-    await sleepAtHome(me);
+    await sleepAtHome(me, bedIndex);
   });
 
   document.getElementById('btn-force-sleep')?.addEventListener('click', async () => {
     closeGenericModal();
-    await sleepAtHome(me, true);
+    await sleepAtHome(me, bedIndex, true);
   });
 }
 
