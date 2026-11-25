@@ -187,14 +187,13 @@ function showToast(message, type = 'info') {
   }, 2800);
 }
 
-function setAuthFeedback(message, type = 'info') {
+function setAuthFeedback(message) {
   const feedback = document.getElementById('auth-login-feedback');
   if (!feedback) return;
 
   feedback.textContent = message;
-  feedback.className = `mt-2 text-center text-[11px] font-bold ${
-    type === 'error' ? 'break-words text-red-700' : type === 'success' ? 'break-words text-emerald-700' : 'break-words text-stone-500'
-  }`;
+  feedback.className = 'mt-2 break-words text-center text-[11px] font-bold text-red-700';
+  feedback.classList.toggle('hidden', !message);
 }
 
 function getGoogleAuthErrorMessage(err) {
@@ -3195,6 +3194,7 @@ function handleAuthStateChange(user) {
   const previousUid = state.user?.uid;
   const accountChanged = Boolean(user && previousUid && previousUid !== user.uid);
   state.user = user;
+  setAuthFeedback('');
 
   const loginButton = document.getElementById('btn-google-login');
   const accountStatus = document.getElementById('auth-account-status');
@@ -3205,10 +3205,6 @@ function handleAuthStateChange(user) {
   if (user) {
     document.getElementById('auth-account-email').textContent = user.email || 'Google 帳號已登入';
     document.getElementById('auth-account-uid').textContent = user.uid;
-    setAuthFeedback(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
-    if (previousUid !== user.uid) {
-      showToast(`Google 登入成功：${user.email || '帳號已驗證'}`, 'success');
-    }
   }
 
   if (!user || accountChanged) {
@@ -3266,12 +3262,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const button = document.getElementById('btn-google-login');
     button.disabled = true;
     button.textContent = '正在開啟 Google 登入…';
-    setAuthFeedback('正在開啟 Google 登入視窗…');
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
     } catch (err) {
       console.error(err);
-      setAuthFeedback(getGoogleAuthErrorMessage(err), 'error');
+      setAuthFeedback(getGoogleAuthErrorMessage(err));
       showToast(getGoogleAuthErrorMessage(err), 'error');
       button.disabled = false;
       button.textContent = '🔐 使用 Google 帳號登入';
@@ -3320,7 +3315,7 @@ document.addEventListener('DOMContentLoaded', () => {
   onAuthStateChanged(auth, handleAuthStateChange, err => {
     console.error(err);
     const message = getGoogleAuthErrorMessage(err);
-    setAuthFeedback(message, 'error');
+    setAuthFeedback(message);
     showToast(message, 'error');
   });
 
